@@ -79,7 +79,7 @@ cp .env.example .env.local
 | `DATABASE_URL` | Supabase PostgreSQL connection string |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anonymous key |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key (for image uploads) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key (server-side staff account creation and image uploads; never expose publicly) |
 | `NEXT_PUBLIC_APP_URL` | Your app URL (`http://localhost:3000` for dev) |
 | `RAZORPAY_KEY_ID` | Razorpay API key |
 | `RAZORPAY_KEY_SECRET` | Razorpay API secret |
@@ -106,14 +106,12 @@ npx prisma db seed
 ### 4. Supabase Auth Setup
 
 1. Create a Supabase project (free tier)
-2. Enable Email auth in Authentication → Providers → Email
-3. (Optional) Disable "Confirm email" for easier testing
-4. Create staff users manually in Supabase Auth (Authentication → Users):
-   - `admin@thebistro.com` / password of your choice
-   - `kitchen@thebistro.com` / password of your choice
-   - `cashier@thebistro.com` / password of your choice
-5. The seed script creates matching Prisma User records for these IDs
-6. To get the correct UUIDs: create users in Supabase Auth first, copy their IDs, update `prisma/seed.ts` with those IDs, then re-run `npx prisma db seed`
+2. Enable Email auth in Authentication → Sign In / Providers → Email.
+3. To disable confirmation for any Supabase-managed email signup, turn off **Confirm email** in the Email provider settings. Accounts created by QRFast's initial-admin and staff flows are created as confirmed users.
+4. In Supabase, open **Project Settings → API Keys** and copy the server-only `service_role` key (legacy) or create a Supabase secret key. Add it as `SUPABASE_SERVICE_ROLE_KEY` in `.env.local` and Vercel. Never use the publishable/anon key here, add a `NEXT_PUBLIC_` prefix, or commit this value.
+5. Create the initial admin through `/signup`. After signing in, use Dashboard → Staff to create Admin and Kitchen logins. Staff sign in at `/login`.
+
+The Staff page creates accounts using the email and password entered by the admin. Email/password is the supported staff sign-in method; phone-number login requires configuring Supabase phone authentication and is not currently enabled.
 
 ### 5. Run Development Server
 
@@ -133,6 +131,7 @@ Open [http://localhost:3000](http://localhost:3000)
 | `/login` | Staff login |
 | `/signup` | One-time initial admin registration; public signup closes after the first admin is created |
 | `/dashboard` | Admin dashboard (analytics, orders, menu, tables, coupons, settings) |
+| `/dashboard/staff` | Admin-only staff account creation and directory |
 | `/kitchen` | Kitchen display (order kanban board) |
 | `/cashier` | Cashier desk (pending/completed payments) |
 | `/order/<id>` | Customer order tracking (paste order ID from dashboard) |
@@ -230,7 +229,8 @@ In Supabase Dashboard → Storage:
 - [ ] **Supabase Storage bucket `menu-images` created and set to Public**
 - [ ] Razorpay webhook configured and tested
 - [ ] Resend domain verified (if using email receipts)
-- [ ] Create real staff accounts in Supabase Auth
+- [ ] Set `SUPABASE_SERVICE_ROLE_KEY` in Vercel for admin-managed staff account creation and image uploads
+- [ ] Create staff logins from Dashboard → Staff
 - [ ] Test QR flow end-to-end on mobile device
 - [ ] Enable HTTPS (automatic on Vercel)
 - [ ] Update `NEXT_PUBLIC_APP_URL` to production domain

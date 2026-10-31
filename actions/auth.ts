@@ -2,6 +2,7 @@
 
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createSupabaseAdminClient } from "@supabase/supabase-js";
 import prisma, { prismaWithRetry } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
@@ -71,12 +72,19 @@ export async function signUp(rawData: {
     return { error: "Too many signup attempts. Please try again later." };
   }
 
-  let supabase;
-  try {
-    supabase = await createClient();
-  } catch {
-    return { error: "Authentication service is unavailable. Please try again." };
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRoleKey) {
+    return {
+      error:
+        "Initial admin signup requires SUPABASE_SERVICE_ROLE_KEY to be configured on the server.",
+    };
   }
+
+  const supabaseAdmin = createSupabaseAdminClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  let createdAuthUserId: string | undefined;
 
   try {
     return await prisma.$transaction(async (tx) => {
@@ -92,14 +100,16 @@ export async function signUp(rawData: {
         };
       }
 
-      const { data: authData, error } = await supabase.auth.signUp({
+      const { data: authData, error } = await supabaseAdmin.auth.admin.createUser({
         email: parsed.data.email,
         password: parsed.data.password,
-        options: { data: { name: parsed.data.name } },
+        email_confirm: true,
+        user_metadata: { name: parsed.data.name },
       });
       if (error || !authData.user) {
         return { error: error?.message || "Failed to create account." };
       }
+      createdAuthUserId = authData.user.id;
 
       await tx.adminUser.create({
         data: {
@@ -110,13 +120,21 @@ export async function signUp(rawData: {
         },
       });
 
-      return {
-        success: true as const,
-        confirmationRequired: !authData.session,
-      };
+      return { success: true as const };
     }, { maxWait: 10_000, timeout: 30_000 });
   } catch (error) {
     console.error("signUp error:", error);
+    if (createdAuthUserId) {
+      const { error: cleanupError } =
+        await supabaseAdmin.auth.admin.deleteUser(createdAuthUserId);
+      if (cleanupError) {
+        console.error("signUp auth cleanup error:", cleanupError.message);
+        return {
+          error:
+            "The Auth account was created but setup could not finish or roll back. Contact support before retrying.",
+        };
+      }
+    }
     return {
       error: "Failed to complete account setup. Please try again or contact support.",
     };

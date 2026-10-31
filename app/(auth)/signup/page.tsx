@@ -67,11 +67,7 @@ export default function SignupPage() {
       return;
     }
 
-    toast.success(
-      result.confirmationRequired
-        ? "Account created! Check your email to confirm it, then sign in."
-        : "Account created! Please sign in."
-    );
+    toast.success("Account created. You can now sign in.");
     window.location.href = "/login";
   };
 

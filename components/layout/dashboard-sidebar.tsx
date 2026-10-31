@@ -13,6 +13,7 @@ import {
   ChefHat,
 
   Bell,
+  UsersRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,7 @@ const adminLinks = [
   { href: "/dashboard/menu", label: "Menu", icon: UtensilsCrossed },
   { href: "/dashboard/tables", label: "Tables", icon: Grid3X3 },
   { href: "/dashboard/offers", label: "Offers", icon: Ticket },
+  { href: "/dashboard/staff", label: "Staff", icon: UsersRound },
 ];
 
 interface DashboardSidebarProps {
