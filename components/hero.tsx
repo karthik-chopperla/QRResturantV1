@@ -1,18 +1,12 @@
 import Link from "next/link";
 import Image from "next/image";
+import localFont from "next/font/local";
 import bgImage from "@/assets/images/herobg.png";
 import logoImage from "@/assets/images/QRFast_Logo-removebg-preview.png";
-import { Outfit, Playfair_Display } from "next/font/google";
 
-const outfit = Outfit({
-  subsets: ["latin"],
-  weight: ["800", "900"],
-});
-
-const playfair = Playfair_Display({
-  subsets: ["latin"],
-  style: ["italic"],
-  weight: ["600", "700"],
+const headingFont = localFont({
+  src: "../app/fonts/GeistVF.woff",
+  weight: "100 900",
 });
 
 export default function Hero() {
@@ -72,11 +66,11 @@ export default function Hero() {
       </header>
 
       <section className="mx-auto w-full max-w-7xl px-4 flex-1 flex flex-col justify-center text-left py-16">
-        <h1 className={`${outfit.className} text-3xl font-black tracking-tight sm:text-5xl lg:text-7xl max-w-3xl text-white leading-none`}>
+        <h1 className={`${headingFont.className} text-3xl font-black tracking-tight sm:text-5xl lg:text-7xl max-w-3xl text-white leading-none`}>
           Let Customers Scan,
           <br />
           Order & Pay
-          <span className={`${playfair.className} block text-xl sm:text-3xl lg:text-5xl font-semibold text-amber-300 mt-2 sm:mt-4 italic normal-case`}>
+          <span className="block font-serif text-xl sm:text-3xl lg:text-5xl font-semibold text-amber-300 mt-2 sm:mt-4 italic normal-case">
             Without Waiting for a Waiter.
           </span>
         </h1>
