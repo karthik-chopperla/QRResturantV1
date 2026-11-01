@@ -585,11 +585,12 @@ export async function updateOrderStatus(id: string, status: OrderStatus) {
           });
         }
 
-        const invoiceCount = await tx.invoice.count();
-        const invoiceNumber = `INV-${String(invoiceCount + 1).padStart(4, "0")}`;
+        const invoiceNumber = `INV-${order.orderNumber ?? order.id}`;
 
-        await tx.invoice.create({
-          data: {
+        await tx.invoice.upsert({
+          where: { orderId: order.id },
+          update: {},
+          create: {
             orderId: order.id,
             invoiceNumber,
             amount: order.totalAmount,
