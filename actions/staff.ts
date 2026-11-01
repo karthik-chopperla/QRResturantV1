@@ -5,6 +5,7 @@ import prisma from "@/lib/prisma";
 import { requireAdmin } from "@/lib/roles";
 import { createStaffAccountSchema } from "@/schemas";
 import { revalidatePath } from "next/cache";
+import { Role } from "@prisma/client";
 
 export async function getStaffAccounts() {
   const admin = await requireAdmin();
@@ -33,7 +34,7 @@ export async function createStaffAccount(rawData: {
   name: string;
   email: string;
   password: string;
-  role: "ADMIN" | "KITCHEN";
+  role: Role;
 }) {
   const admin = await requireAdmin();
   if (!admin) return { error: "Unauthorized" as const };

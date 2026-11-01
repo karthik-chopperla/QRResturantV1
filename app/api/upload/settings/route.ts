@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   }
 
   const dbUser = await getCurrentUser();
-  if (!dbUser || dbUser.role !== Role.ADMIN) {
+  if (!dbUser || dbUser.role !== Role.RESTAURANT_OWNER) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

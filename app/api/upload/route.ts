@@ -21,9 +21,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // 2. Role check — only ADMIN can upload
+  // 2. Role check — only the restaurant owner can upload
   const dbUser = await getCurrentUser();
-  if (!dbUser || dbUser.role !== Role.ADMIN) {
+  if (!dbUser || dbUser.role !== Role.RESTAURANT_OWNER) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

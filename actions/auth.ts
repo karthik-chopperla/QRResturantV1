@@ -10,6 +10,7 @@ import { getDefaultRouteForRole } from "@/lib/roles";
 import { checkRateLimit, getServerActionIp } from "@/lib/rate-limit";
 import { touchSession, clearSession, isSessionFresh } from "@/lib/session";
 import { signUpSchema } from "@/schemas/auth";
+import { Role } from "@prisma/client";
 
 export async function signIn(data: { email: string; password: string }) {
   const ip = await getServerActionIp();
@@ -91,7 +92,7 @@ export async function signUp(rawData: {
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(736284105)::text`;
 
       const existingAdmin = await tx.adminUser.findFirst({
-        where: { role: "ADMIN" },
+        where: { role: Role.RESTAURANT_OWNER },
         select: { id: true },
       });
       if (existingAdmin) {
@@ -116,7 +117,7 @@ export async function signUp(rawData: {
           id: authData.user.id,
           email: parsed.data.email,
           name: parsed.data.name,
-          role: "ADMIN",
+          role: Role.RESTAURANT_OWNER,
         },
       });
 

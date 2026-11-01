@@ -109,9 +109,15 @@ npx prisma db seed
 2. Enable Email auth in Authentication → Sign In / Providers → Email.
 3. To disable confirmation for any Supabase-managed email signup, turn off **Confirm email** in the Email provider settings. Accounts created by QRFast's initial-admin and staff flows are created as confirmed users.
 4. In Supabase, open **Project Settings → API Keys** and copy the server-only `service_role` key (legacy) or create a Supabase secret key. Add it as `SUPABASE_SERVICE_ROLE_KEY` in `.env.local` and Vercel. Never use the publishable/anon key here, add a `NEXT_PUBLIC_` prefix, or commit this value.
-5. Create the initial admin through `/signup`. After signing in, use Dashboard → Staff to create Admin and Kitchen logins. Staff sign in at `/login`.
+5. Create the initial Restaurant Owner through `/signup`. After signing in, use Dashboard → Staff to create accounts for any of the eight roles. Staff sign in at `/login`.
 
 The Staff page creates accounts using the email and password entered by the admin. Email/password is the supported staff sign-in method; phone-number login requires configuring Supabase phone authentication and is not currently enabled.
+
+### Staff roles
+
+The app supports Restaurant Owner, Manager, Cashier, Service Staff, Chef / Kitchen Staff, Inventory Manager, Purchase Manager, and Accountant accounts. Customer ordering remains public and requires no login. Until role responsibilities are configured, only Restaurant Owner has the existing dashboard permissions and Chef / Kitchen Staff has the existing kitchen-board permissions. The other roles can sign in to a staff landing page but do not receive dashboard or kitchen access.
+
+Existing `ADMIN` and `KITCHEN` database roles are renamed to `RESTAURANT_OWNER` and `CHEF_KITCHEN_STAFF` by the staff-role migration. Apply the migration before deploying code that uses the new roles.
 
 ### 5. Run Development Server
 
@@ -130,9 +136,10 @@ Open [http://localhost:3000](http://localhost:3000)
 | `/menu/the-bistro/table-1/cart` | Checkout page |
 | `/login` | Staff login |
 | `/signup` | One-time initial admin registration; public signup closes after the first admin is created |
-| `/dashboard` | Admin dashboard (analytics, orders, menu, tables, coupons, settings) |
-| `/dashboard/staff` | Admin-only staff account creation and directory |
-| `/kitchen` | Kitchen display (order kanban board) |
+| `/dashboard` | Restaurant Owner dashboard (analytics, orders, menu, tables, offers, settings) |
+| `/dashboard/staff` | Restaurant Owner-only staff account creation and directory |
+| `/kitchen` | Chef / Kitchen Staff order board |
+| `/staff` | Landing page for roles whose responsibilities are not configured yet |
 | `/cashier` | Cashier desk (pending/completed payments) |
 | `/order/<id>` | Customer order tracking (paste order ID from dashboard) |
 
@@ -141,8 +148,9 @@ Open [http://localhost:3000](http://localhost:3000)
 ```
 app/
   (auth)/               # Login, signup, forgot/reset password
-  dashboard/            # Admin dashboard (overview, menu, orders, tables, coupons, settings)
+  dashboard/            # Restaurant Owner dashboard and staff management
   kitchen/              # Kitchen display (kanban board)
+  staff/                # Landing page for roles awaiting responsibility assignments
   cashier/              # Cashier desk (pending/completed payments)
   menu/[slug]/[table]/  # Customer QR menu (public, no auth)
   order/[id]/           # Order tracking (public, no auth)

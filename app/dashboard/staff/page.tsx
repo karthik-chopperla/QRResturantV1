@@ -18,13 +18,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
 import { Loader2, UserPlus } from "lucide-react";
 import { Role } from "@prisma/client";
+import { roleLabels } from "@/lib/roles";
 
 export default function StaffPage() {
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<"ADMIN" | "KITCHEN">("KITCHEN");
+  const [role, setRole] = useState<Role>(Role.CHEF_KITCHEN_STAFF);
   const [creating, setCreating] = useState(false);
 
   const { data, isLoading } = useQuery({
@@ -109,18 +110,27 @@ export default function StaffPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="staff-role">Role</Label>
+                <p className="text-xs text-muted-foreground">
+                  Role-specific permissions will be configured after the responsibilities are defined.
+                </p>
                 <Select
                   value={role}
                   onValueChange={(value) => {
-                    if (value === "ADMIN" || value === "KITCHEN") setRole(value);
+                    const selectedRole = Object.values(Role).find(
+                      (staffRole) => staffRole === value
+                    );
+                    if (selectedRole) setRole(selectedRole);
                   }}
                 >
                   <SelectTrigger id="staff-role">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="KITCHEN">Kitchen</SelectItem>
-                    <SelectItem value="ADMIN">Admin</SelectItem>
+                    {Object.values(Role).map((staffRole) => (
+                      <SelectItem key={staffRole} value={staffRole}>
+                        {roleLabels[staffRole]}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -152,7 +162,7 @@ export default function StaffPage() {
                       </p>
                     </div>
                     <span className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-xs font-medium">
-                      {account.role === Role.KITCHEN ? "Kitchen" : "Admin"}
+                      {roleLabels[account.role]}
                     </span>
                   </CardContent>
                 </Card>

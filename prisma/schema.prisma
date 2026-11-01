@@ -7,8 +7,14 @@ generator client {
 }
 
 enum Role {
-  ADMIN
-  KITCHEN
+  RESTAURANT_OWNER
+  MANAGER
+  CASHIER
+  SERVICE_STAFF
+  CHEF_KITCHEN_STAFF
+  INVENTORY_MANAGER
+  PURCHASE_MANAGER
+  ACCOUNTANT
 }
 
 enum TableStatus {
@@ -63,7 +69,7 @@ model AdminUser {
   id        String   @id // Matches Supabase Auth User ID (UUID)
   email     String   @unique
   name      String?
-  role      Role     @default(ADMIN)
+  role      Role     @default(RESTAURANT_OWNER)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

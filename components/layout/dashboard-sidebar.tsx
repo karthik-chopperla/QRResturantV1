@@ -21,6 +21,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { signOut } from "@/actions/auth";
 import { Role } from "@prisma/client";
 import { canAccessKitchen } from "@/lib/roles";
+import { roleLabels } from "@/lib/roles";
 import { toast } from "sonner";
 
 const adminLinks = [
@@ -123,7 +124,7 @@ export function DashboardSidebar({ user, unreadCount = 0 }: DashboardSidebarProp
           </div>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium">{user.name}</p>
-            <p className="truncate text-xs text-muted-foreground">{user.role}</p>
+            <p className="truncate text-xs text-muted-foreground">{roleLabels[user.role]}</p>
           </div>
           <ThemeToggle />
         </div>
