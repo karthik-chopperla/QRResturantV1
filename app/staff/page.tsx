@@ -19,7 +19,13 @@ export default async function StaffHomePage() {
 
   if (
     user.role === Role.RESTAURANT_OWNER ||
-    user.role === Role.CHEF_KITCHEN_STAFF
+    user.role === Role.CHEF_KITCHEN_STAFF ||
+    user.role === Role.MANAGER ||
+    user.role === Role.CASHIER ||
+    user.role === Role.SERVICE_STAFF ||
+    user.role === Role.INVENTORY_MANAGER ||
+    user.role === Role.PURCHASE_MANAGER ||
+    user.role === Role.ACCOUNTANT
   ) {
     redirect(getDefaultRouteForRole(user.role));
   }

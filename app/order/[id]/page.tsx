@@ -22,7 +22,9 @@ export default async function OrderPage({ params }: Props) {
   });
 
   const tableParam = order
-    ? generateTableToken(order.table.id)
+    ? order.table
+      ? generateTableToken(order.table.id)
+      : undefined
     : undefined;
   const primaryColor = settings?.primaryColor ?? "#E11D48";
 

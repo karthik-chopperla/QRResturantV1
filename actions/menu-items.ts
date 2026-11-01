@@ -5,15 +5,17 @@ import { Prisma } from "@prisma/client";
 import { requireAdmin } from "@/lib/roles";
 import { menuItemSchema, type MenuItemInput } from "@/schemas";
 import { revalidatePath } from "next/cache";
+import { convertDecimalsDeep } from "@/lib/decimal";
 
 export async function getMenuItems() {
   const user = await requireAdmin();
   if (!user) throw new Error("Unauthorized");
 
-  return prisma.menuItem.findMany({
+  const menuItems = await prisma.menuItem.findMany({
     include: { category: true, variants: true, addons: true },
     orderBy: { createdAt: "desc" },
   });
+  return convertDecimalsDeep(menuItems);
 }
 
 export async function createMenuItem(rawData: MenuItemInput) {
@@ -153,7 +155,15 @@ export async function deleteMenuItem(id: string) {
   if (!user) return { error: "Unauthorized" };
 
   try {
-    // Fetch the menu item to get its image URLs
+    const orderHistoryCount = await prisma.orderItem.count({
+      where: { menuItemId: id },
+    });
+    if (orderHistoryCount > 0) {
+      return {
+        error: "This menu item appears in order history and cannot be deleted. Mark it unavailable instead.",
+      };
+    }
+
     const item = await prisma.menuItem.findUnique({
       where: { id },
       select: { images: true },
@@ -163,17 +173,14 @@ export async function deleteMenuItem(id: string) {
       return { error: "Menu item not found." };
     }
 
-    // Delete from database first
     await prisma.menuItem.delete({ where: { id } });
 
-    // Then delete images from Supabase Storage (non-fatal if it fails)
     if (item.images.length > 0) {
       const { deleteImages } = await import("@/lib/supabase/storage");
       try {
         await deleteImages(item.images);
       } catch (storageError) {
         console.error("Failed to delete images from storage:", storageError);
-        // Non-fatal: DB record is already gone
       }
     }
 

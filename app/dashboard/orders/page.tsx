@@ -30,7 +30,7 @@ export default function OrdersPage() {
       !search ||
       o.customerName.toLowerCase().includes(search.toLowerCase()) ||
       o.id.includes(search) ||
-      o.table.number.includes(search);
+      (o.table?.number ?? o.orderNumber ?? "takeaway").includes(search);
     const matchStatus = statusFilter === "all" || o.status === statusFilter;
     return matchSearch && matchStatus;
   });
@@ -102,7 +102,9 @@ export default function OrdersPage() {
                     <div>
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="font-semibold">{order.customerName}</span>
-                        <Badge variant="outline">Table {order.table.number}</Badge>
+                        <Badge variant="outline">
+                          {order.table ? `Table ${order.table.number}` : `Takeaway #${order.orderNumber ?? order.id.slice(-8).toUpperCase()}`}
+                        </Badge>
                         <Badge className={getOrderStatusColor(order.status)} variant="secondary">
                           {getOrderStatusLabel(order.status)}
                         </Badge>

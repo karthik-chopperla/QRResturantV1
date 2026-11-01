@@ -54,15 +54,24 @@ export function convertDecimalsArray<T extends DecimalFields>(arr: T[]): T[] {
 /**
  * Recursively convert all Prisma.Decimal values to JavaScript numbers in an object tree.
  */
-export function convertDecimalsDeep<T>(obj: T): T {
-  if (obj == null || typeof obj !== "object") return obj;
-  if (Array.isArray(obj)) return obj.map(convertDecimalsDeep) as T;
+export type DecimalSerialized<T> =
+  T extends null | undefined ? T
+    : T extends Date ? Date
+      : T extends { toNumber: () => number } ? number
+        : T extends readonly (infer U)[] ? DecimalSerialized<U>[]
+          : T extends object ? { [K in keyof T]: DecimalSerialized<T[K]> }
+            : T;
+
+export function convertDecimalsDeep<T>(obj: T): DecimalSerialized<T> {
+  if (obj == null || typeof obj !== "object") return obj as DecimalSerialized<T>;
+  if (obj instanceof Date) return obj as DecimalSerialized<T>;
+  if (Array.isArray(obj)) return obj.map(convertDecimalsDeep) as DecimalSerialized<T>;
   if ("toNumber" in obj && typeof (obj as { toNumber: () => number }).toNumber === "function") {
-    return (obj as { toNumber: () => number }).toNumber() as T;
+    return (obj as { toNumber: () => number }).toNumber() as DecimalSerialized<T>;
   }
   const result: Record<string, unknown> = {};
   for (const key of Object.keys(obj as Record<string, unknown>)) {
     result[key] = convertDecimalsDeep((obj as Record<string, unknown>)[key]);
   }
-  return result as T;
+  return result as DecimalSerialized<T>;
 }

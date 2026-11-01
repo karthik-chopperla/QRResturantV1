@@ -2,7 +2,12 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createStaffAccount, getStaffAccounts } from "@/actions/staff";
+import {
+  createStaffAccount,
+  getStaffAccounts,
+  sendStaffPasswordReset,
+  updateStaffAccount,
+} from "@/actions/staff";
 import { StaffHeader } from "@/components/layout/dashboard-sidebar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,9 +19,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
-import { Loader2, UserPlus } from "lucide-react";
+import { Loader2, Pencil, KeyRound, UserPlus } from "lucide-react";
 import { Role } from "@prisma/client";
 import { roleLabels } from "@/lib/roles";
 
@@ -27,6 +34,14 @@ export default function StaffPage() {
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>(Role.CHEF_KITCHEN_STAFF);
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<{
+    id: string;
+    name: string;
+    email: string;
+    role: Role;
+    isActive: boolean;
+  } | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ["staff-accounts"],
@@ -54,6 +69,29 @@ export default function StaffPage() {
     } finally {
       setCreating(false);
     }
+  };
+
+  const handleUpdate = async () => {
+    if (!editing) return;
+    setSavingEdit(true);
+    try {
+      const result = await updateStaffAccount(editing);
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Staff account updated");
+      setEditing(null);
+      await queryClient.invalidateQueries({ queryKey: ["staff-accounts"] });
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handlePasswordReset = async (accountEmail: string) => {
+    const result = await sendStaffPasswordReset(accountEmail);
+    if ("error" in result) toast.error(result.error);
+    else toast.success(`Password reset email sent to ${accountEmail}`);
   };
 
   return (
@@ -152,7 +190,7 @@ export default function StaffPage() {
             <div className="space-y-2">
               {data.accounts.map((account) => (
                 <Card key={account.id}>
-                  <CardContent className="flex items-center justify-between gap-4 p-4">
+                  <CardContent className="flex flex-wrap items-center justify-between gap-4 p-4">
                     <div className="min-w-0">
                       <p className="truncate font-medium">
                         {account.name || account.email}
@@ -160,10 +198,41 @@ export default function StaffPage() {
                       <p className="truncate text-sm text-muted-foreground">
                         {account.email}
                       </p>
+                      <p className={`text-xs ${account.isActive ? "text-emerald-600" : "text-destructive"}`}>
+                        {account.isActive ? "Active" : "Inactive"}
+                      </p>
                     </div>
-                    <span className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-xs font-medium">
-                      {roleLabels[account.role]}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-xs font-medium">
+                        {roleLabels[account.role]}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        aria-label={`Edit ${account.name || account.email}`}
+                        onClick={() =>
+                          setEditing({
+                            id: account.id,
+                            name: account.name || "",
+                            email: account.email,
+                            role: account.role,
+                            isActive: account.isActive,
+                          })
+                        }
+                      >
+                        <Pencil className="size-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        aria-label={`Send password reset to ${account.email}`}
+                        onClick={() => handlePasswordReset(account.email)}
+                      >
+                        <KeyRound className="size-4" />
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
               ))}
@@ -175,6 +244,80 @@ export default function StaffPage() {
           )}
         </section>
       </div>
+      <Dialog open={editing !== null} onOpenChange={(open) => !open && setEditing(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Staff Account</DialogTitle>
+          </DialogHeader>
+          {editing && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-staff-name">Name</Label>
+                <Input
+                  id="edit-staff-name"
+                  value={editing.name}
+                  onChange={(event) =>
+                    setEditing({ ...editing, name: event.target.value })
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-staff-email">Email</Label>
+                <Input
+                  id="edit-staff-email"
+                  type="email"
+                  value={editing.email}
+                  onChange={(event) =>
+                    setEditing({ ...editing, email: event.target.value })
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-staff-role">Role</Label>
+                <Select
+                  value={editing.role}
+                  onValueChange={(value) => {
+                    const selectedRole = Object.values(Role).find(
+                      (staffRole) => staffRole === value
+                    );
+                    if (selectedRole) setEditing({ ...editing, role: selectedRole });
+                  }}
+                >
+                  <SelectTrigger id="edit-staff-role">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.values(Role).map((staffRole) => (
+                      <SelectItem key={staffRole} value={staffRole}>
+                        {roleLabels[staffRole]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <Label htmlFor="edit-staff-active">Account active</Label>
+                <Switch
+                  id="edit-staff-active"
+                  checked={editing.isActive}
+                  onCheckedChange={(isActive) =>
+                    setEditing({ ...editing, isActive })
+                  }
+                />
+              </div>
+              {!editing.isActive && (
+                <p className="text-sm text-muted-foreground">
+                  This staff member will be prevented from signing in and active sessions will be blocked.
+                </p>
+              )}
+              <Button className="w-full" onClick={handleUpdate} disabled={savingEdit}>
+                {savingEdit && <Loader2 className="mr-2 size-4 animate-spin" />}
+                Save Staff Account
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

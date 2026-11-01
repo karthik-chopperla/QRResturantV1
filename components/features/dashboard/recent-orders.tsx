@@ -12,7 +12,8 @@ type Order = {
   totalAmount: number | { toNumber(): number };
   status: string;
   createdAt: Date;
-  table: { number: string };
+  table: { number: string } | null;
+  orderNumber: string | null;
 };
 
 export function RecentOrdersTable({ orders }: { orders: Order[] }) {
@@ -46,7 +47,9 @@ export function RecentOrdersTable({ orders }: { orders: Order[] }) {
                   {orders.map((order) => (
                     <tr key={order.id} className="border-b border-border/50">
                       <td className="py-3 pr-4 font-mono text-xs">{order.id.slice(0, 8)}...</td>
-                      <td className="py-3 pr-4">T-{order.table.number}</td>
+                      <td className="py-3 pr-4">
+                        {order.table ? `T-${order.table.number}` : order.orderNumber ?? "Takeaway"}
+                      </td>
                       <td className="py-3 pr-4">{order.customerName}</td>
                       <td className="py-3 pr-4 font-medium">{formatCurrency(order.totalAmount)}</td>
                       <td className="py-3 pr-4">
@@ -70,7 +73,9 @@ export function RecentOrdersTable({ orders }: { orders: Order[] }) {
                     <span className="font-bold">{formatCurrency(order.totalAmount)}</span>
                   </div>
                   <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
-                    <span>T-{order.table.number}</span>
+                    <span>
+                      {order.table ? `T-${order.table.number}` : order.orderNumber ?? "Takeaway"}
+                    </span>
                     <span>·</span>
                     <span>{formatDate(order.createdAt)}</span>
                   </div>

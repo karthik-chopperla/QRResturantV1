@@ -93,7 +93,9 @@ export function CartClient({
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [couponCode, setCouponCode] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(PaymentMethod.CASH);
+  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "RAZORPAY">(
+    PaymentMethod.CASH
+  );
   const [loading, setLoading] = useState(false);
   const [couponLoading, setCouponLoading] = useState(false);
 

@@ -116,7 +116,9 @@ export async function POST(request: Request) {
         select: {
           id: true,
           status: true,
+          orderType: true,
           customerName: true,
+          orderNumber: true,
           totalAmount: true,
           tableId: true,
           table: { select: { number: true } },
@@ -132,6 +134,10 @@ export async function POST(request: Request) {
 
       // Finalize: CONFIRMED → PLACED, occupy table, notify kitchen
       if (order.status === OrderStatus.CONFIRMED) {
+        if (order.orderType === "DINE_IN" && (!order.tableId || !order.table)) {
+          throw new Error("Dine-in order is missing its table.");
+        }
+
         await tx.order.update({
           where: { id: order.id },
           data: {
@@ -140,14 +146,19 @@ export async function POST(request: Request) {
           },
         });
 
-        await tx.table.update({
-          where: { id: order.tableId },
-          data: { status: TableStatus.OCCUPIED },
-        });
+        if (order.tableId) {
+          await tx.table.update({
+            where: { id: order.tableId },
+            data: { status: TableStatus.OCCUPIED },
+          });
+        }
 
+        const orderLabel = order.table
+          ? `Table ${order.table.number}`
+          : `Takeaway #${order.orderNumber ?? order.id.slice(-8).toUpperCase()}`;
         await tx.notification.create({
           data: {
-            title: `New Order! Table ${order.table.number}`,
+            title: `New Order! ${orderLabel}`,
             message: `${order.customerName} placed an order for ₹${toNumber(order.totalAmount)}`,
             type: NotificationType.NEW_ORDER,
           },

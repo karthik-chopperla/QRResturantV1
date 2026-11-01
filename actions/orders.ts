@@ -3,8 +3,11 @@
 import prisma from "@/lib/prisma";
 import { getRazorpayClient } from "@/lib/razorpay";
 import { resend } from "@/lib/resend";
-import { getCurrentUser } from "./auth";
-import { requireAdmin, requireStaff } from "@/lib/roles";
+import {
+  requireCashier,
+  requireOrderStatusAccess,
+  requireOrdersViewer,
+} from "@/lib/roles";
 import { validateOffer } from "./offers";
 import { createOrderSchema, type CreateOrderInput } from "@/schemas";
 import {
@@ -15,7 +18,7 @@ import {
   TableStatus,
 } from "@prisma/client";
 import { revalidatePath } from "next/cache";
-import { toNumber } from "@/lib/decimal";
+import { convertDecimalsDeep, toNumber } from "@/lib/decimal";
 
 // ─── Public ──────────────────────────────────────────────────────────────────
 
@@ -270,10 +273,11 @@ export async function cancelUnpaidOrder(orderId: string, tableId: string) {
 export async function getCustomerOrder(id: string) {
   if (!id || typeof id !== "string") return null;
   try {
-    return prisma.order.findUnique({
+    const order = await prisma.order.findUnique({
       where: { id },
       select: {
         id: true,
+        orderNumber: true,
         status: true,
         paymentStatus: true,
         paymentMethod: true,
@@ -305,6 +309,7 @@ export async function getCustomerOrder(id: string) {
         },
       },
     });
+    return convertDecimalsDeep(order);
   } catch {
     return null;
   }
@@ -386,11 +391,11 @@ export async function submitReview(data: {
 // ─── Staff (authenticated) ────────────────────────────────────────────────────
 
 export async function getOrders() {
-  const user = await requireStaff();
+  const user = await requireOrdersViewer();
   if (!user) return [];
 
   try {
-    return prisma.order.findMany({
+    const orders = await prisma.order.findMany({
       include: {
         table: true,
         orderItems: { include: { menuItem: true } },
@@ -399,36 +404,186 @@ export async function getOrders() {
       },
       orderBy: { createdAt: "desc" },
     });
+    return convertDecimalsDeep(orders);
   } catch {
     return [];
   }
 }
 
 export async function updateOrderStatus(id: string, status: OrderStatus) {
-  const user = await requireStaff();
+  const user = await requireOrderStatusAccess(status);
   if (!user) return { error: "Unauthorized" };
+  if (!Object.values(OrderStatus).includes(status)) {
+    return { error: "Invalid order status." };
+  }
 
   try {
     const updatedOrder = await prisma.$transaction(async (tx) => {
+      const current = await tx.order.findUnique({
+        where: { id },
+        select: {
+          status: true,
+          orderType: true,
+          paymentStatus: true,
+        },
+      });
+      if (!current) throw new Error("Order not found.");
+
+      if (user.role === "CHEF_KITCHEN_STAFF") {
+        const allowedTransitions: Partial<Record<OrderStatus, OrderStatus>> = {
+          [OrderStatus.PLACED]: OrderStatus.PREPARING,
+          [OrderStatus.CONFIRMED]: OrderStatus.PREPARING,
+          [OrderStatus.PREPARING]: OrderStatus.PREPARED,
+          [OrderStatus.PREPARED]: OrderStatus.READY,
+        };
+        if (allowedTransitions[current.status] !== status) {
+          throw new Error("Kitchen staff can only advance an order to its next preparation step.");
+        }
+      }
+
+      if (user.role === "SERVICE_STAFF") {
+        if (
+          current.status !== OrderStatus.READY ||
+          (status === OrderStatus.SERVED && current.orderType !== "DINE_IN") ||
+          (status === OrderStatus.COLLECTED && current.orderType !== "TAKEAWAY")
+        ) {
+          throw new Error("Service staff can only complete the handover for a ready order of the matching type.");
+        }
+      }
+
+      if (
+        status === OrderStatus.CANCELLED &&
+        current.paymentStatus === PaymentStatus.SUCCESS
+      ) {
+        throw new Error("This paid order cannot be cancelled as a refund. Process a provider-confirmed refund first.");
+      }
+
       const order = await tx.order.update({
         where: { id },
-        data: { status },
+        data: {
+          status,
+          ...(status === OrderStatus.SERVED && { servedAt: new Date() }),
+          ...(status === OrderStatus.COLLECTED && { collectedAt: new Date() }),
+        },
         include: { table: true },
       });
 
+      if (
+        status === OrderStatus.PREPARING &&
+        current.status !== OrderStatus.PREPARING
+      ) {
+        const orderItems = await tx.orderItem.findMany({
+          where: { orderId: id },
+          select: { menuItemId: true, quantity: true },
+        });
+        const recipes = await tx.recipeIngredient.findMany({
+          where: {
+            menuItemId: { in: orderItems.map((item) => item.menuItemId) },
+          },
+        });
+        const quantityByMenuItem = new Map(
+          orderItems.map((item) => [item.menuItemId, item.quantity])
+        );
+        const requirementByIngredient = new Map<string, number>();
+        for (const recipe of recipes) {
+          requirementByIngredient.set(
+            recipe.ingredientId,
+            (requirementByIngredient.get(recipe.ingredientId) ?? 0) +
+              Number(recipe.quantity) *
+                (quantityByMenuItem.get(recipe.menuItemId) ?? 0)
+          );
+        }
+
+        for (const [ingredientId, quantity] of requirementByIngredient) {
+          const idempotencyKey = `order-consumption:${id}:${ingredientId}`;
+          const alreadyDeducted = await tx.stockMovement.findUnique({
+            where: { idempotencyKey },
+            select: { id: true },
+          });
+          if (alreadyDeducted) continue;
+
+          const updated = await tx.ingredient.updateMany({
+            where: { id: ingredientId, quantityOnHand: { gte: quantity } },
+            data: { quantityOnHand: { decrement: quantity } },
+          });
+          if (updated.count !== 1) {
+            const ingredient = await tx.ingredient.findUnique({
+              where: { id: ingredientId },
+              select: { name: true, unit: true, quantityOnHand: true },
+            });
+            throw new Error(
+              `Insufficient stock for ${ingredient?.name ?? "an ingredient"}: need ${quantity} ${ingredient?.unit ?? ""}, available ${ingredient?.quantityOnHand ?? 0}.`
+            );
+          }
+          await tx.stockMovement.create({
+            data: {
+              ingredientId,
+              type: "ORDER_CONSUMPTION",
+              quantity: -quantity,
+              reason: `Ingredients used for order ${order.orderNumber ?? order.id}`,
+              referenceType: "Order",
+              referenceId: id,
+              idempotencyKey,
+              actorId: user.id,
+            },
+          });
+        }
+      }
+
+      if (status === OrderStatus.CANCELLED) {
+        const consumedMovements = await tx.stockMovement.findMany({
+          where: {
+            referenceType: "Order",
+            referenceId: id,
+            type: "ORDER_CONSUMPTION",
+          },
+          select: { id: true, ingredientId: true, quantity: true },
+        });
+        for (const movement of consumedMovements) {
+          const idempotencyKey = `order-reversal:${id}:${movement.ingredientId}`;
+          const alreadyReversed = await tx.stockMovement.findUnique({
+            where: { idempotencyKey },
+            select: { id: true },
+          });
+          if (alreadyReversed) continue;
+          const quantity = Math.abs(Number(movement.quantity));
+          await tx.ingredient.update({
+            where: { id: movement.ingredientId },
+            data: { quantityOnHand: { increment: quantity } },
+          });
+          await tx.stockMovement.create({
+            data: {
+              ingredientId: movement.ingredientId,
+              type: "REVERSAL",
+              quantity,
+              reason: `Stock restored for cancelled order ${order.orderNumber ?? order.id}`,
+              referenceType: "Order",
+              referenceId: id,
+              idempotencyKey,
+              actorId: user.id,
+            },
+          });
+        }
+      }
+
       if (status === OrderStatus.READY) {
+        const orderLabel = order.table
+          ? `Table ${order.table.number}`
+          : `Takeaway #${order.orderNumber ?? order.id.slice(-8).toUpperCase()}`;
         await tx.notification.create({
           data: {
-            title: `Order Ready! Table ${order.table.number}`,
+            title: `Order Ready! ${orderLabel}`,
             message: `Order for ${order.customerName} is prepared and ready to serve.`,
             type: NotificationType.KITCHEN_READY,
           },
         });
       } else if (status === OrderStatus.COMPLETED) {
-        await tx.table.update({
-          where: { id: order.tableId },
-          data: { status: TableStatus.AVAILABLE },
-        });
+        if (order.tableId) {
+          await tx.table.update({
+            where: { id: order.tableId },
+            data: { status: TableStatus.AVAILABLE },
+          });
+        }
 
         const invoiceCount = await tx.invoice.count();
         const invoiceNumber = `INV-${String(invoiceCount + 1).padStart(4, "0")}`;
@@ -442,17 +597,6 @@ export async function updateOrderStatus(id: string, status: OrderStatus) {
             discountAmount: order.discountAmount,
           },
         });
-
-        if (order.paymentMethod === PaymentMethod.CASH) {
-          await tx.order.update({
-            where: { id },
-            data: { paymentStatus: PaymentStatus.SUCCESS },
-          });
-          await tx.payment.updateMany({
-            where: { orderId: id, method: PaymentMethod.CASH },
-            data: { status: PaymentStatus.SUCCESS },
-          });
-        }
 
         // Send email receipt only if Resend is configured and a valid email exists
         if (resend) {
@@ -477,10 +621,12 @@ export async function updateOrderStatus(id: string, status: OrderStatus) {
           }
         }
       } else if (status === OrderStatus.CANCELLED) {
-        await tx.table.update({
-          where: { id: order.tableId },
-          data: { status: TableStatus.AVAILABLE },
-        });
+        if (order.tableId) {
+          await tx.table.update({
+            where: { id: order.tableId },
+            data: { status: TableStatus.AVAILABLE },
+          });
+        }
 
         if (order.paymentStatus === PaymentStatus.SUCCESS) {
           await tx.payment.updateMany({
@@ -503,6 +649,17 @@ export async function updateOrderStatus(id: string, status: OrderStatus) {
         }
       }
 
+      await tx.auditLog.create({
+        data: {
+          actorId: user.id,
+          actorEmail: user.email,
+          action: "ORDER_STATUS_UPDATED",
+          entityType: "Order",
+          entityId: id,
+          details: { previousStatus: current.status, status },
+        },
+      });
+
       return order;
     });
 
@@ -518,18 +675,77 @@ export async function updateOrderPaymentStatus(
   id: string,
   paymentStatus: PaymentStatus
 ) {
-  const user = await requireAdmin();
+  const user = await requireCashier();
   if (!user) return { error: "Unauthorized" };
+  if (paymentStatus !== PaymentStatus.SUCCESS) {
+    return {
+      error: "Manual payment updates may only confirm a received cash payment. Refunds and online payment status must be provider-verified.",
+    };
+  }
 
   try {
     await prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id },
+        select: { paymentMethod: true, paymentStatus: true },
+      });
+      if (!order) throw new Error("Order not found.");
+      if (order.paymentMethod === PaymentMethod.RAZORPAY) {
+        throw new Error("Online Razorpay payments must be provider-verified.");
+      }
+      if (order.paymentStatus === PaymentStatus.SUCCESS) return;
+      if (order.paymentStatus !== PaymentStatus.PENDING) {
+        throw new Error("This payment cannot be confirmed from its current status.");
+      }
+
+      const register = await tx.cashRegisterSession.findFirst({
+        where: { cashierId: user.id, closedAt: null },
+        orderBy: { openedAt: "desc" },
+        select: { id: true },
+      });
+      if (!register) {
+        throw new Error("Open your cash register before confirming a collected payment.");
+      }
+
+      const pendingPayments = await tx.payment.findMany({
+        where: {
+          orderId: id,
+          status: PaymentStatus.PENDING,
+          method: order.paymentMethod,
+        },
+        select: { id: true },
+      });
+      if (pendingPayments.length === 0) {
+        throw new Error("No matching pending payment record was found.");
+      }
+
       await tx.order.update({ where: { id }, data: { paymentStatus } });
-      await tx.payment.updateMany({ where: { orderId: id }, data: { status: paymentStatus } });
+      await tx.payment.updateMany({
+        where: {
+          orderId: id,
+          status: PaymentStatus.PENDING,
+          method: order.paymentMethod,
+        },
+        data: {
+          status: paymentStatus,
+          cashRegisterSessionId: register.id,
+        },
+      });
       await tx.notification.create({
         data: {
           title: "Payment Updated",
           message: `Order payment status changed to ${paymentStatus}.`,
           type: NotificationType.PAYMENT,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorId: user.id,
+          actorEmail: user.email,
+          action: "OFFLINE_PAYMENT_CONFIRMED",
+          entityType: "Order",
+          entityId: id,
+          details: { method: order.paymentMethod },
         },
       });
     });

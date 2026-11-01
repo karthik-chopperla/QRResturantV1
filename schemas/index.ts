@@ -51,6 +51,17 @@ export const createOrderSchema = z.object({
 
 export type CreateOrderInput = z.infer<typeof createOrderSchema>;
 
+export const createTakeawayOrderSchema = z.object({
+  customerName: z.string().trim().max(100).optional().default(""),
+  customerPhone: z.string().trim().max(20).optional().default(""),
+  paymentMethod: z.enum(["CASH", "UPI", "CARD"]),
+  items: z.array(cartItemSchema).min(1, "Order must have at least one item"),
+  couponCode: z.string().trim().max(50).optional().or(z.literal("")),
+  notes: z.string().trim().max(500).optional().or(z.literal("")),
+});
+
+export type CreateTakeawayOrderInput = z.infer<typeof createTakeawayOrderSchema>;
+
 // ─── Menu Item ───────────────────────────────────────────────────────────────
 
 const variantSchema = z.object({
@@ -123,6 +134,23 @@ export const createStaffAccountSchema = z.object({
     "PURCHASE_MANAGER",
     "ACCOUNTANT",
   ]),
+});
+
+export const updateStaffAccountSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().trim().min(1, "Name is required").max(100),
+  email: z.string().trim().email("Enter a valid email address").transform((email) => email.toLowerCase()),
+  role: z.enum([
+    "RESTAURANT_OWNER",
+    "MANAGER",
+    "CASHIER",
+    "SERVICE_STAFF",
+    "CHEF_KITCHEN_STAFF",
+    "INVENTORY_MANAGER",
+    "PURCHASE_MANAGER",
+    "ACCOUNTANT",
+  ]),
+  isActive: z.boolean(),
 });
 
 // ─── Offer ───────────────────────────────────────────────────────────────────

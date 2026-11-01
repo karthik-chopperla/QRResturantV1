@@ -1,7 +1,17 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
-const protectedPrefixes = ["/dashboard", "/kitchen", "/staff"];
+const protectedPrefixes = [
+  "/dashboard",
+  "/kitchen",
+  "/staff",
+  "/manager",
+  "/service",
+  "/cashier",
+  "/inventory",
+  "/purchasing",
+  "/accountant",
+];
 const authRoutes = ["/login", "/signup", "/forgot-password"];
 
 export async function updateSession(request: NextRequest) {

@@ -5,14 +5,16 @@ import { Prisma } from "@prisma/client";
 import { requireAdmin } from "@/lib/roles";
 import { settingsSchema, type SettingsInput } from "@/schemas";
 import { revalidatePath } from "next/cache";
+import { convertDecimalsDeep } from "@/lib/decimal";
 
 export async function getSettings() {
   const user = await requireAdmin();
   if (!user) throw new Error("Unauthorized");
 
-  return prisma.settings.findUnique({
+  const settings = await prisma.settings.findUnique({
     where: { id: "singleton" },
   });
+  return convertDecimalsDeep(settings);
 }
 
 export async function updateRestaurantSettings(rawData: SettingsInput) {

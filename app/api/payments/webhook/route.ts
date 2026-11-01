@@ -79,7 +79,7 @@ export async function POST(request: Request) {
       await prisma.$transaction(async (tx) => {
         const payment = await tx.payment.findFirst({
           where: { transactionId: razorpayOrderId },
-          include: { order: { select: { id: true, status: true, customerName: true, totalAmount: true, tableId: true, table: { select: { number: true } } } } },
+          include: { order: { select: { id: true, status: true, orderType: true, orderNumber: true, customerName: true, totalAmount: true, tableId: true, table: { select: { number: true } } } } },
         });
 
         if (!payment) {
@@ -103,6 +103,13 @@ export async function POST(request: Request) {
 
         // If order is still CONFIRMED (verify endpoint hasn't run yet), transition it
         if (payment.order.status === OrderStatus.CONFIRMED) {
+          if (
+            payment.order.orderType === "DINE_IN" &&
+            (!payment.order.tableId || !payment.order.table)
+          ) {
+            throw new Error("Dine-in order is missing its table.");
+          }
+
           await tx.order.update({
             where: { id: payment.orderId },
             data: {
@@ -111,14 +118,19 @@ export async function POST(request: Request) {
             },
           });
 
-          await tx.table.update({
-            where: { id: payment.order.tableId },
-            data: { status: TableStatus.OCCUPIED },
-          });
+          if (payment.order.tableId) {
+            await tx.table.update({
+              where: { id: payment.order.tableId },
+              data: { status: TableStatus.OCCUPIED },
+            });
+          }
 
+          const orderLabel = payment.order.table
+            ? `Table ${payment.order.table.number}`
+            : `Takeaway #${payment.order.orderNumber ?? payment.order.id.slice(-8).toUpperCase()}`;
           await tx.notification.create({
             data: {
-              title: `New Order! Table ${payment.order.table.number}`,
+              title: `New Order! ${orderLabel}`,
               message: `${payment.order.customerName} placed an order for ₹${toNumber(payment.order.totalAmount)}`,
               type: NotificationType.NEW_ORDER,
             },
@@ -186,11 +198,15 @@ export async function POST(request: Request) {
 
           const order = await tx.order.findUnique({
             where: { id: payment.orderId },
-            select: { id: true, status: true, customerName: true, totalAmount: true, tableId: true, table: { select: { number: true } } },
+            select: { id: true, status: true, orderType: true, orderNumber: true, customerName: true, totalAmount: true, tableId: true, table: { select: { number: true } } },
           });
 
           if (order) {
             if (order.status === OrderStatus.CONFIRMED) {
+              if (order.orderType === "DINE_IN" && (!order.tableId || !order.table)) {
+                throw new Error("Dine-in order is missing its table.");
+              }
+
               await tx.order.update({
                 where: { id: order.id },
                 data: {
@@ -198,13 +214,18 @@ export async function POST(request: Request) {
                   status: OrderStatus.PLACED,
                 },
               });
-              await tx.table.update({
-                where: { id: order.tableId },
-                data: { status: TableStatus.OCCUPIED },
-              });
+              if (order.tableId) {
+                await tx.table.update({
+                  where: { id: order.tableId },
+                  data: { status: TableStatus.OCCUPIED },
+                });
+              }
+              const orderLabel = order.table
+                ? `Table ${order.table.number}`
+                : `Takeaway #${order.orderNumber ?? order.id.slice(-8).toUpperCase()}`;
               await tx.notification.create({
                 data: {
-                  title: `New Order! Table ${order.table.number}`,
+                  title: `New Order! ${orderLabel}`,
                   message: `${order.customerName} placed an order for ₹${toNumber(order.totalAmount)}`,
                   type: NotificationType.NEW_ORDER,
                 },

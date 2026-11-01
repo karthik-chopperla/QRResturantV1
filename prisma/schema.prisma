@@ -31,7 +31,13 @@ enum OrderStatus {
   READY
   SERVED
   COMPLETED
+  COLLECTED
   CANCELLED
+}
+
+enum OrderType {
+  DINE_IN
+  TAKEAWAY
 }
 
 enum PaymentStatus {
@@ -44,6 +50,8 @@ enum PaymentStatus {
 enum PaymentMethod {
   RAZORPAY
   CASH
+  UPI
+  CARD
 }
 
 enum NotificationType {
@@ -52,6 +60,10 @@ enum NotificationType {
   CALL_WAITER
   REQUEST_BILL
   KITCHEN_READY
+  LOW_STOCK
+  PURCHASE_APPROVAL
+  PURCHASE_RECEIVED
+  RESERVATION
 }
 
 enum DiscountType {
@@ -65,11 +77,57 @@ enum FoodType {
   VEGAN
 }
 
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  SEATED
+  CANCELLED
+  COMPLETED
+}
+
+enum StockMovementType {
+  PURCHASE
+  ADJUSTMENT
+  WASTAGE
+  ORDER_CONSUMPTION
+  REVERSAL
+}
+
+enum PurchaseStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
+enum RefundStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+}
+
+enum ExpenseCategory {
+  RENT
+  ELECTRICITY
+  WATER
+  SALARIES
+  MAINTENANCE
+  MARKETING
+  TRANSPORTATION
+  SUPPLIES
+  OTHER
+}
+
 model AdminUser {
   id        String   @id // Matches Supabase Auth User ID (UUID)
   email     String   @unique
   name      String?
   role      Role     @default(RESTAURANT_OWNER)
+  isActive  Boolean  @default(true)
+  assignedOrders Order[] @relation("ServiceStaffAssignment")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -100,8 +158,9 @@ model Table {
   qrCodeUrl String?
   status    TableStatus @default(AVAILABLE)
   orders    Order[]
+  reservations Reservation[]
   createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+  updatedAt DateTime   @updatedAt
 }
 
 model Category {
@@ -111,7 +170,7 @@ model Category {
   image       String?
   sortOrder   Int        @default(0)
   parentId    String?
-  parent      Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Cascade)
+  parent      Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
   children    Category[] @relation("CategoryTree")
   menuItems   MenuItem[]
   createdAt   DateTime   @default(now())
@@ -137,9 +196,10 @@ model MenuItem {
   allergens       String[]
   nutrition       Json?
   categoryId      String
-  category        Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  category        Category    @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   variants        Variant[]
   addons          Addon[]
+  recipeItems     RecipeIngredient[]
   orderItems      OrderItem[]
   reviews         Review[]
   createdAt       DateTime    @default(now())
@@ -169,8 +229,12 @@ model Addon {
 
 model Order {
   id                  String        @id @default(uuid())
-  tableId             String
-  table               Table         @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  orderNumber         String?       @unique
+  orderType           OrderType     @default(DINE_IN)
+  tableId             String?
+  table               Table?        @relation(fields: [tableId], references: [id], onDelete: SetNull)
+  assignedServiceStaffId String?
+  assignedServiceStaff AdminUser?   @relation("ServiceStaffAssignment", fields: [assignedServiceStaffId], references: [id], onDelete: SetNull)
   customerName        String
   customerPhone       String
   status              OrderStatus   @default(PLACED)
@@ -183,12 +247,20 @@ model Order {
   totalAmount         Decimal  @db.Decimal(10,2)
   offerCode           String?
   notes               String?
+  servedAt            DateTime?
+  collectedAt         DateTime?
   orderItems          OrderItem[]
   payments            Payment[]
+  refunds             Refund[]
   reviews             Review[]
   invoices            Invoice[]
+  customer            Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerId          String?
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
+
+  @@index([orderType, createdAt])
+  @@index([assignedServiceStaffId, status])
 }
 
 model OrderItem {
@@ -196,7 +268,7 @@ model OrderItem {
   orderId        String
   order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   menuItemId     String
-  menuItem       MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  menuItem       MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
   quantity       Int
   price          Decimal  @db.Decimal(10,2)
   notes          String?
@@ -214,6 +286,9 @@ model Payment {
   paymentId     String?
   signature     String?
   status        PaymentStatus @default(PENDING)
+  cashRegisterSessionId String?
+  cashRegisterSession   CashRegisterSession? @relation(fields: [cashRegisterSessionId], references: [id], onDelete: SetNull)
+  refunds       Refund[]
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 }
@@ -266,4 +341,244 @@ model Invoice {
   taxAmount      Decimal  @db.Decimal(10,2)
   discountAmount Decimal  @db.Decimal(10,2)
   createdAt      DateTime @default(now())
+}
+
+model Customer {
+  id         String   @id @default(uuid())
+  name       String?
+  phone      String?  @unique
+  email      String?
+  orders     Order[]
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Reservation {
+  id             String            @id @default(uuid())
+  customerName   String
+  customerPhone  String
+  guestCount     Int
+  startsAt       DateTime
+  endsAt         DateTime?
+  status         ReservationStatus @default(PENDING)
+  notes          String?
+  tableId        String?
+  table          Table?            @relation(fields: [tableId], references: [id], onDelete: SetNull)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@index([startsAt, status])
+  @@index([tableId, startsAt])
+}
+
+model IngredientCategory {
+  id          String       @id @default(uuid())
+  name        String       @unique
+  ingredients Ingredient[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model Ingredient {
+  id               String             @id @default(uuid())
+  name             String             @unique
+  unit             String
+  quantityOnHand   Decimal            @default(0) @db.Decimal(12,3)
+  minimumQuantity  Decimal            @default(0) @db.Decimal(12,3)
+  unitCost         Decimal            @default(0) @db.Decimal(10,2)
+  expiresAt        DateTime?
+  categoryId       String?
+  category         IngredientCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  recipeItems      RecipeIngredient[]
+  stockMovements   StockMovement[]
+  purchaseItems    PurchaseOrderItem[]
+  receiptItems     PurchaseReceiptItem[]
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@index([quantityOnHand, minimumQuantity])
+}
+
+model RecipeIngredient {
+  id           String     @id @default(uuid())
+  menuItemId   String
+  menuItem     MenuItem   @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  ingredientId String
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+  quantity     Decimal    @db.Decimal(12,3)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@unique([menuItemId, ingredientId])
+}
+
+model StockMovement {
+  id             String            @id @default(uuid())
+  ingredientId   String
+  ingredient     Ingredient        @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+  type           StockMovementType
+  quantity       Decimal           @db.Decimal(12,3)
+  unitCost       Decimal?          @db.Decimal(10,2)
+  reason         String?
+  referenceType  String?
+  referenceId    String?
+  idempotencyKey String?           @unique
+  actorId        String?
+  createdAt      DateTime          @default(now())
+
+  @@index([ingredientId, createdAt])
+  @@index([referenceType, referenceId])
+}
+
+model Supplier {
+  id             String          @id @default(uuid())
+  name           String
+  contactName    String?
+  email          String?
+  phone          String?
+  address        String?
+  notes          String?
+  isActive       Boolean         @default(true)
+  purchaseOrders PurchaseOrder[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@unique([name, phone])
+}
+
+model PurchaseOrder {
+  id               String               @id @default(uuid())
+  purchaseNumber   String               @unique
+  supplierId       String
+  supplier         Supplier             @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  status           PurchaseStatus       @default(DRAFT)
+  totalAmount      Decimal              @default(0) @db.Decimal(10,2)
+  notes            String?
+  items            PurchaseOrderItem[]
+  receipts         PurchaseReceipt[]
+  supplierPayments SupplierPayment[]
+  createdById      String?
+  approvedById     String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  @@index([status, createdAt])
+}
+
+model PurchaseOrderItem {
+  id               String        @id @default(uuid())
+  purchaseOrderId  String
+  purchaseOrder    PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  ingredientId     String
+  ingredient       Ingredient    @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+  receiptItems     PurchaseReceiptItem[]
+  orderedQuantity  Decimal       @db.Decimal(12,3)
+  receivedQuantity Decimal       @default(0) @db.Decimal(12,3)
+  unitCost         Decimal       @db.Decimal(10,2)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@unique([purchaseOrderId, ingredientId])
+}
+
+model PurchaseReceipt {
+  id                    String               @id @default(uuid())
+  purchaseOrderId       String
+  purchaseOrder         PurchaseOrder       @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  idempotencyKey        String               @unique
+  supplierInvoiceNumber String?
+  notes                 String?
+  items                 PurchaseReceiptItem[]
+  receivedById          String?
+  receivedAt            DateTime             @default(now())
+}
+
+model PurchaseReceiptItem {
+  id                  String            @id @default(uuid())
+  receiptId           String
+  receipt             PurchaseReceipt   @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  purchaseOrderItemId String
+  purchaseOrderItem   PurchaseOrderItem @relation(fields: [purchaseOrderItemId], references: [id], onDelete: Restrict)
+  ingredientId        String
+  ingredient          Ingredient        @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+  quantity            Decimal           @db.Decimal(12,3)
+  unitCost            Decimal           @db.Decimal(10,2)
+
+  @@unique([receiptId, purchaseOrderItemId])
+}
+
+model Expense {
+  id          String          @id @default(uuid())
+  description String
+  category    ExpenseCategory
+  amount      Decimal         @db.Decimal(10,2)
+  incurredAt  DateTime        @default(now())
+  reference   String?
+  notes       String?
+  createdById String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([incurredAt, category])
+}
+
+model SupplierPayment {
+  id              String        @id @default(uuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  amount          Decimal       @db.Decimal(10,2)
+  method          PaymentMethod
+  reference       String?
+  paidAt          DateTime      @default(now())
+  recordedById    String?
+  createdAt       DateTime      @default(now())
+
+  @@index([paidAt])
+}
+
+model Refund {
+  id                 String       @id @default(uuid())
+  orderId            String
+  order              Order        @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  paymentId          String?
+  payment            Payment?     @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  providerRefundId   String?      @unique
+  amount             Decimal      @db.Decimal(10,2)
+  method             PaymentMethod
+  status             RefundStatus @default(PENDING)
+  reason             String?
+  requestedById      String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  @@index([orderId, createdAt])
+  @@index([status, createdAt])
+}
+
+model CashRegisterSession {
+  id              String    @id @default(uuid())
+  cashierId       String
+  openedAt        DateTime  @default(now())
+  closedAt        DateTime?
+  openingBalance  Decimal   @db.Decimal(10,2)
+  closingBalance  Decimal?  @db.Decimal(10,2)
+  expectedBalance Decimal?  @db.Decimal(10,2)
+  notes           String?
+  payments        Payment[]
+
+  @@index([cashierId, openedAt])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  actorEmail String?
+  action     String
+  entityType String
+  entityId   String?
+  details    Json?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorId, createdAt])
 }

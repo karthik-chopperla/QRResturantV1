@@ -4,15 +4,16 @@ import prisma from "@/lib/prisma";
 import { requireAdmin } from "@/lib/roles";
 import { offerSchema, type OfferInput } from "@/schemas";
 import { revalidatePath } from "next/cache";
-import { toNumber } from "@/lib/decimal";
+import { convertDecimalsDeep, toNumber } from "@/lib/decimal";
 
 export async function getOffers() {
   const user = await requireAdmin();
   if (!user) throw new Error("Unauthorized");
 
-  return prisma.offer.findMany({
+  const offers = await prisma.offer.findMany({
     orderBy: { expiryDate: "asc" },
   });
+  return convertDecimalsDeep(offers);
 }
 
 export async function createOffer(rawData: OfferInput) {

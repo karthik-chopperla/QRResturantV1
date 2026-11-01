@@ -31,6 +31,7 @@ const STATUS_STEPS: OrderStatus[] = [
   OrderStatus.READY,
   OrderStatus.SERVED,
   OrderStatus.COMPLETED,
+  OrderStatus.COLLECTED,
 ];
 
 const STATUS_META: Record<
@@ -68,6 +69,11 @@ const STATUS_META: Record<
     icon: <CheckCircle2 className="size-5" />,
     label: "Completed",
     desc: "Thank you for dining with us!",
+  },
+  COLLECTED: {
+    icon: <CheckCircle2 className="size-5" />,
+    label: "Collected",
+    desc: "Your takeaway order has been collected. Thank you!",
   },
   CANCELLED: {
     icon: <XCircle className="size-5" />,
@@ -149,7 +155,9 @@ export function OrderTrackingClient({
 
   const currentStepIndex = STATUS_STEPS.indexOf(order.status);
   const isCancelled = order.status === OrderStatus.CANCELLED;
-  const isCompleted = order.status === OrderStatus.COMPLETED;
+  const isCompleted =
+    order.status === OrderStatus.COMPLETED ||
+    order.status === OrderStatus.COLLECTED;
   const isActive = !isCancelled && !isCompleted;
 
   // Estimated time remaining (rough based on status)
@@ -169,7 +177,10 @@ export function OrderTrackingClient({
       <div className="border-b border-border/60 bg-background/95 px-4 py-5 text-center backdrop-blur-sm">
         <h1 className="text-xl font-bold">Order Tracking</h1>
         <p className="text-sm text-muted-foreground mt-0.5">
-          Table {order.table.number} · #{orderId.slice(-8).toUpperCase()}
+          {order.table
+            ? `Table ${order.table.number}`
+            : `Takeaway #${order.orderNumber ?? orderId.slice(-8).toUpperCase()}`}
+          {" · "}#{orderId.slice(-8).toUpperCase()}
         </p>
         {isActive && (
           <button

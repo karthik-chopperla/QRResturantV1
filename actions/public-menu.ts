@@ -70,7 +70,6 @@ export async function getPublicMenu(tableParam: string) {
     take: 10,
   });
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return convertDecimalsDeep({
     restaurant: settings,
     table,
@@ -78,12 +77,13 @@ export async function getPublicMenu(tableParam: string) {
     bestsellers,
     newItems,
     reviews,
-  }) as any;
+  });
 }
 
 export async function getPublicMenuItem(itemId: string) {
-  return prisma.menuItem.findFirst({
+  const item = await prisma.menuItem.findFirst({
     where: { id: itemId, isAvailable: true },
     include: { variants: true, addons: true, category: true, reviews: true },
   });
+  return convertDecimalsDeep(item);
 }

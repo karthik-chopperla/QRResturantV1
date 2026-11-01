@@ -6,7 +6,6 @@ import { createClient as createSupabaseAdminClient } from "@supabase/supabase-js
 import prisma, { prismaWithRetry } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
-import { getDefaultRouteForRole } from "@/lib/roles";
 import { checkRateLimit, getServerActionIp } from "@/lib/rate-limit";
 import { touchSession, clearSession, isSessionFresh } from "@/lib/session";
 import { signUpSchema } from "@/schemas/auth";
@@ -46,7 +45,12 @@ export async function signIn(data: { email: string; password: string }) {
       where: { id: authData.user.id },
     });
     if (!user) {
+      await supabase.auth.signOut();
       return { error: "Staff account not found." };
+    }
+    if (!user.isActive) {
+      await supabase.auth.signOut();
+      return { error: "This staff account is inactive. Contact the Restaurant Owner." };
     }
   } catch {
     return { error: "Failed to load account information. Please try again." };
@@ -239,6 +243,13 @@ export async function getCurrentUser() {
     if (!authUser) return null;
 
     const dbUser = await getDbUser(authUser.id);
+    if (!dbUser || !dbUser.isActive) {
+      if (dbUser && !dbUser.isActive) {
+        await supabase.auth.signOut();
+        await clearSession();
+      }
+      return null;
+    }
     return dbUser;
   } catch (err) {
     unstable_rethrow(err);

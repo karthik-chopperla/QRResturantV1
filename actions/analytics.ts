@@ -1,11 +1,12 @@
 "use server";
 
 import prisma from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 import { requireAdmin } from "@/lib/roles";
 import { OrderStatus, PaymentStatus } from "@prisma/client";
-import { toNumber } from "@/lib/decimal";
+import { convertDecimalsDeep, toNumber } from "@/lib/decimal";
 
-const emptyStats = { todayOrders: 0, pendingOrders: 0, completedToday: 0, todayRevenue: 0, totalTables: 0, occupiedTables: 0, topItems: [] as { item: any; quantity: number }[], chartData: [] as { date: string; revenue: number }[], totalRevenue: 0, avgOrderValue: 0 };
+const emptyStats = { todayOrders: 0, pendingOrders: 0, completedToday: 0, todayRevenue: 0, totalTables: 0, occupiedTables: 0, topItems: [] as { item: Prisma.MenuItemGetPayload<object> | null; quantity: number }[], chartData: [] as { date: string; revenue: number }[], totalRevenue: 0, avgOrderValue: 0 };
 
 export async function getDashboardStats() {
   const user = await requireAdmin();
@@ -93,7 +94,7 @@ export async function getDashboardStats() {
 
     const avgOrderValue = todayOrders > 0 ? toNumber(todayRevenue._sum.totalAmount) / todayOrders : 0;
 
-    return {
+    return convertDecimalsDeep({
       todayOrders,
       pendingOrders,
       completedToday,
@@ -104,7 +105,7 @@ export async function getDashboardStats() {
       chartData,
       totalRevenue,
       avgOrderValue,
-    };
+    });
   } catch {
     return { ...emptyStats };
   }
@@ -129,7 +130,7 @@ export async function exportOrdersCSV() {
     const rows = orders
       .map(
         (o) =>
-          `${o.id},${o.table.number},${csvSafeField(o.customerName)},${o.customerPhone},${o.status},${o.paymentStatus},${o.totalAmount},${o.createdAt.toISOString()}`
+          `${o.id},${o.table?.number ?? o.orderNumber ?? "Takeaway"},${csvSafeField(o.customerName)},${o.customerPhone},${o.status},${o.paymentStatus},${o.totalAmount},${o.createdAt.toISOString()}`
       )
       .join("\n");
 

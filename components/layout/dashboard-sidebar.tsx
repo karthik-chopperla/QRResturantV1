@@ -14,6 +14,10 @@ import {
 
   Bell,
   UsersRound,
+  Wallet,
+  Boxes,
+  Truck,
+  Calculator,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -31,6 +35,9 @@ const adminLinks = [
   { href: "/dashboard/tables", label: "Tables", icon: Grid3X3 },
   { href: "/dashboard/offers", label: "Offers", icon: Ticket },
   { href: "/dashboard/staff", label: "Staff", icon: UsersRound },
+  { href: "/inventory", label: "Inventory", icon: Boxes },
+  { href: "/purchasing", label: "Purchasing", icon: Truck },
+  { href: "/accountant", label: "Accounting", icon: Calculator },
 ];
 
 interface DashboardSidebarProps {
@@ -44,18 +51,6 @@ interface DashboardSidebarProps {
 
 export function DashboardSidebar({ user, unreadCount = 0 }: DashboardSidebarProps) {
   const pathname = usePathname();
-  const router = useRouter();
-
-  const handleSignOut = async () => {
-    const result = await signOut();
-    if ("error" in result && result.error) {
-      toast.error(result.error);
-      return;
-    }
-    toast.success("Signed out");
-    router.push("/login");
-    router.refresh();
-  };
 
   return (
     <aside className="flex h-screen w-58 flex-col border-r border-border bg-card">
@@ -102,6 +97,21 @@ export function DashboardSidebar({ user, unreadCount = 0 }: DashboardSidebarProp
           </Link>
         )}
 
+        {user.role === Role.RESTAURANT_OWNER || user.role === Role.CASHIER ? (
+          <Link
+            href="/cashier"
+            className={cn(
+              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+              pathname.startsWith("/cashier")
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            )}
+          >
+            <Wallet className="size-4" />
+            Cashier POS
+          </Link>
+        ) : null}
+
 
       </nav>
 
@@ -128,23 +138,88 @@ export function DashboardSidebar({ user, unreadCount = 0 }: DashboardSidebarProp
           </div>
           <ThemeToggle />
         </div>
-        <Button variant="outline" size="sm" className="w-full" onClick={handleSignOut}>
-          <LogOut className="mr-2 size-4" />
-          Sign Out
-        </Button>
+        <SignOutButton className="w-full" />
       </div>
     </aside>
   );
 }
 
-export function StaffHeader({ title, subtitle }: { title: string; subtitle?: string }) {
+function SignOutButton({ className }: { className?: string }) {
+  const router = useRouter();
+
+  const handleSignOut = async () => {
+    try {
+      const result = await signOut();
+      if ("error" in result && result.error) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Signed out");
+      router.push("/login");
+      router.refresh();
+    } catch (error) {
+      console.error("Sign out failed:", error);
+      toast.error("Failed to sign out. Please try again.");
+    }
+  };
+
   return (
-    <div className="flex items-center justify-between border-b border-border bg-card px-4 py-4 sm:px-6">
-      <div className="min-w-0">
-        <h1 className="truncate text-xl font-semibold tracking-tight">{title}</h1>
-        {subtitle && <p className="truncate text-sm text-muted-foreground">{subtitle}</p>}
+    <Button variant="outline" size="sm" className={className} onClick={handleSignOut}>
+      <LogOut className="mr-2 size-4" />
+      Sign Out
+    </Button>
+  );
+}
+
+export function StaffHeader({
+  title,
+  subtitle,
+  role,
+}: {
+  title: string;
+  subtitle?: string;
+  role?: Role;
+}) {
+  const roleLinks: Partial<Record<Role, Array<{ href: string; label: string }>>> = {
+    [Role.MANAGER]: [
+      { href: "/manager", label: "Operations" },
+      { href: "/kitchen", label: "Kitchen" },
+      { href: "/service", label: "Service" },
+    ],
+    [Role.CASHIER]: [{ href: "/cashier", label: "POS & Billing" }],
+    [Role.SERVICE_STAFF]: [{ href: "/service", label: "Service Tasks" }],
+    [Role.CHEF_KITCHEN_STAFF]: [{ href: "/kitchen", label: "Kitchen Board" }],
+    [Role.INVENTORY_MANAGER]: [{ href: "/inventory", label: "Inventory" }],
+    [Role.PURCHASE_MANAGER]: [{ href: "/purchasing", label: "Purchasing" }],
+    [Role.ACCOUNTANT]: [{ href: "/accountant", label: "Accounts" }],
+  };
+  const links = role ? roleLinks[role] ?? [] : [];
+
+  return (
+    <div className="border-b border-border bg-card px-4 py-4 sm:px-6">
+      <div className="flex items-center justify-between">
+        <div className="min-w-0">
+          <h1 className="truncate text-xl font-semibold tracking-tight">{title}</h1>
+          {subtitle && <p className="truncate text-sm text-muted-foreground">{subtitle}</p>}
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="hidden md:block"><ThemeToggle /></div>
+          <SignOutButton />
+        </div>
       </div>
-      <div className="hidden md:block"><ThemeToggle /></div>
+      {links.length > 0 && (
+        <nav className="mt-3 flex flex-wrap gap-2" aria-label="Role navigation">
+          {links.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className="rounded-md border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              {link.label}
+            </Link>
+          ))}
+        </nav>
+      )}
     </div>
   );
 }

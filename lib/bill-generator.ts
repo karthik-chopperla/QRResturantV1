@@ -149,7 +149,7 @@ export async function generateBillHtml(orderId: string): Promise<string | null> 
     <div class="meta">
       <div>
         <span class="label">Table</span>
-        <strong>${escapeHtml(order.table.number)}</strong>
+        <strong>${escapeHtml(order.table?.number ?? order.orderNumber ?? "Takeaway")}</strong>
       </div>
       <div style="text-align:center;">
         <span class="label">Customer</span>

@@ -7,8 +7,18 @@ export function getDefaultRouteForRole(role: Role): string {
       return "/kitchen";
     case Role.RESTAURANT_OWNER:
       return "/dashboard";
-    default:
-      return "/staff";
+    case Role.MANAGER:
+      return "/manager";
+    case Role.SERVICE_STAFF:
+      return "/service";
+    case Role.CASHIER:
+      return "/cashier";
+    case Role.INVENTORY_MANAGER:
+      return "/inventory";
+    case Role.PURCHASE_MANAGER:
+      return "/purchasing";
+    case Role.ACCOUNTANT:
+      return "/accountant";
   }
 }
 
@@ -17,7 +27,11 @@ export function canAccessDashboard(role: Role): boolean {
 }
 
 export function canAccessKitchen(role: Role): boolean {
-  return role === Role.CHEF_KITCHEN_STAFF || role === Role.RESTAURANT_OWNER;
+  return (
+    role === Role.CHEF_KITCHEN_STAFF ||
+    role === Role.RESTAURANT_OWNER ||
+    role === Role.MANAGER
+  );
 }
 
 export function isOwner(role: Role): boolean {
@@ -45,6 +59,100 @@ export async function requireStaff() {
   if (
     user.role !== Role.RESTAURANT_OWNER &&
     user.role !== Role.CHEF_KITCHEN_STAFF
+  ) {
+    return null;
+  }
+  return user;
+}
+
+export async function requireOrdersViewer() {
+  const user = await getCurrentUser();
+  if (!user) return null;
+  if (
+    user.role !== Role.RESTAURANT_OWNER &&
+    user.role !== Role.MANAGER &&
+    user.role !== Role.CASHIER &&
+    user.role !== Role.SERVICE_STAFF &&
+    user.role !== Role.CHEF_KITCHEN_STAFF
+  ) {
+    return null;
+  }
+  return user;
+}
+
+export async function requireOrderStatusAccess(status: string) {
+  const user = await getCurrentUser();
+  if (!user) return null;
+  if (user.role === Role.RESTAURANT_OWNER || user.role === Role.MANAGER) {
+    return user;
+  }
+  if (
+    user.role === Role.CHEF_KITCHEN_STAFF &&
+    ["PREPARING", "PREPARED", "READY"].includes(status)
+  ) {
+    return user;
+  }
+  if (
+    user.role === Role.SERVICE_STAFF &&
+    ["SERVED", "COLLECTED"].includes(status)
+  ) {
+    return user;
+  }
+  return null;
+}
+
+export async function requireCashier() {
+  const user = await getCurrentUser();
+  if (!user) return null;
+  if (user.role !== Role.RESTAURANT_OWNER && user.role !== Role.CASHIER) {
+    return null;
+  }
+  return user;
+}
+
+export async function requireServiceStaff() {
+  const user = await getCurrentUser();
+  if (!user) return null;
+  if (
+    user.role !== Role.RESTAURANT_OWNER &&
+    user.role !== Role.MANAGER &&
+    user.role !== Role.SERVICE_STAFF
+  ) {
+    return null;
+  }
+  return user;
+}
+
+export async function requireInventoryAccess() {
+  const user = await getCurrentUser();
+  if (!user) return null;
+  if (
+    user.role !== Role.RESTAURANT_OWNER &&
+    user.role !== Role.INVENTORY_MANAGER
+  ) {
+    return null;
+  }
+  return user;
+}
+
+export async function requirePurchaseAccess() {
+  const user = await getCurrentUser();
+  if (!user) return null;
+  if (
+    user.role !== Role.RESTAURANT_OWNER &&
+    user.role !== Role.PURCHASE_MANAGER
+  ) {
+    return null;
+  }
+  return user;
+}
+
+export async function requireAccountingAccess() {
+  const user = await getCurrentUser();
+  if (!user) return null;
+  if (
+    user.role !== Role.RESTAURANT_OWNER &&
+    user.role !== Role.ACCOUNTANT
   ) {
     return null;
   }

@@ -80,6 +80,16 @@ export async function deleteTable(id: string) {
   if (!user) return { error: "Unauthorized" };
 
   try {
+    const [orderCount, reservationCount] = await Promise.all([
+      prisma.order.count({ where: { tableId: id } }),
+      prisma.reservation.count({ where: { tableId: id } }),
+    ]);
+    if (orderCount > 0 || reservationCount > 0) {
+      return {
+        error: "This table has order or reservation history and cannot be deleted. Set it to unavailable instead.",
+      };
+    }
+
     await prisma.table.delete({ where: { id } });
     revalidatePath("/dashboard/tables");
     return { success: true };

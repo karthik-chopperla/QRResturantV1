@@ -86,6 +86,16 @@ export async function deleteCategory(id: string) {
   if (!user) return { error: "Unauthorized" };
 
   try {
+    const [menuItemCount, childCount] = await Promise.all([
+      prisma.menuItem.count({ where: { categoryId: id } }),
+      prisma.category.count({ where: { parentId: id } }),
+    ]);
+    if (menuItemCount > 0 || childCount > 0) {
+      return {
+        error: "This category still contains menu items or subcategories. Move them before deleting it.",
+      };
+    }
+
     await prisma.category.delete({
       where: { id },
     });

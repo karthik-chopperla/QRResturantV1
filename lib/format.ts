@@ -33,6 +33,7 @@ export function getOrderStatusLabel(status: string): string {
     READY: "Ready to Serve",
     SERVED: "Served",
     COMPLETED: "Completed",
+    COLLECTED: "Collected",
     CANCELLED: "Cancelled",
   };
   return labels[status] || status;
@@ -47,6 +48,7 @@ export function getOrderStatusColor(status: string): string {
     READY: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300",
     SERVED: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300",
     COMPLETED: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
+    COLLECTED: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
     CANCELLED: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300",
   };
   return colors[status] || "bg-muted text-muted-foreground";
