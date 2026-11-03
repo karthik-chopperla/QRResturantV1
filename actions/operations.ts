@@ -88,6 +88,7 @@ export async function getManagerOverview() {
       _count: { _all: true },
     }),
     prisma.ingredient.findMany({
+      where: { isActive: true },
       select: { quantityOnHand: true, minimumQuantity: true },
     }),
     prisma.purchaseOrder.count({

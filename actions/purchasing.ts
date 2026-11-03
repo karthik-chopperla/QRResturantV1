@@ -1,16 +1,22 @@
 "use server";
 
 import prisma from "@/lib/prisma";
-import { requireOwner, requirePurchaseAccess } from "@/lib/roles";
+import {
+  requireInventoryAccess,
+  requireOwner,
+  requirePurchaseAccess,
+} from "@/lib/roles";
 import {
   NotificationType,
   PaymentMethod,
   PurchaseStatus,
+  PurchaseRequestStatus,
   StockMovementType,
 } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { convertDecimalsDeep } from "@/lib/decimal";
+import { addIngredientStock } from "@/lib/inventory-stock";
 
 const supplierSchema = z.object({
   name: z.string().trim().min(1).max(150),
@@ -25,17 +31,19 @@ export async function getPurchasingData() {
   const user = await requirePurchaseAccess();
   if (!user) return { error: "Unauthorized" as const };
 
-  const [suppliers, ingredients, purchaseOrders] = await Promise.all([
+  const [suppliers, ingredients, purchaseOrders, purchaseRequests] = await Promise.all([
     prisma.supplier.findMany({
       orderBy: { name: "asc" },
     }),
     prisma.ingredient.findMany({
+      where: { isActive: true },
       select: { id: true, name: true, unit: true, unitCost: true },
       orderBy: { name: "asc" },
     }),
     prisma.purchaseOrder.findMany({
       include: {
         supplier: { select: { name: true } },
+        purchaseRequest: { select: { requestNumber: true } },
         items: {
           include: { ingredient: { select: { name: true, unit: true } } },
         },
@@ -48,8 +56,135 @@ export async function getPurchasingData() {
       orderBy: { createdAt: "desc" },
       take: 100,
     }),
+    prisma.purchaseRequest.findMany({
+      include: {
+        items: {
+          include: { ingredient: { select: { id: true, name: true, unit: true } } },
+        },
+        purchaseOrder: {
+          select: {
+            id: true,
+            purchaseNumber: true,
+            status: true,
+            expectedDeliveryAt: true,
+            supplier: { select: { name: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    }),
   ]);
-  return convertDecimalsDeep({ suppliers, ingredients, purchaseOrders });
+  return convertDecimalsDeep({ suppliers, ingredients, purchaseOrders, purchaseRequests });
+}
+
+export async function createPurchaseRequest(input: unknown) {
+  const user = await requireInventoryAccess();
+  if (!user) return { error: "Unauthorized" as const };
+  const parsed = z.object({
+    notes: z.string().trim().max(500).optional(),
+    items: z.array(z.object({
+      ingredientId: z.string().uuid(),
+      quantity: z.number().finite().positive(),
+    })).min(1).max(100),
+  }).safeParse(input);
+  if (!parsed.success) {
+    return { error: parsed.error.issues.map((issue) => issue.message).join(", ") };
+  }
+  if (new Set(parsed.data.items.map((item) => item.ingredientId)).size !== parsed.data.items.length) {
+    return { error: "Each ingredient can appear only once in a request." as const };
+  }
+
+  try {
+    const request = await prisma.$transaction(async (tx) => {
+      const activeIngredients = await tx.ingredient.count({
+        where: {
+          id: { in: parsed.data.items.map((item) => item.ingredientId) },
+          isActive: true,
+        },
+      });
+      if (activeIngredients !== parsed.data.items.length) {
+        throw new Error("One or more ingredients were not found or are inactive.");
+      }
+      const requestNumber = `PR-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+      const created = await tx.purchaseRequest.create({
+        data: {
+          requestNumber,
+          notes: parsed.data.notes || null,
+          requestedById: user.id,
+          items: {
+            create: parsed.data.items.map((item) => ({
+              ingredientId: item.ingredientId,
+              quantity: item.quantity,
+            })),
+          },
+        },
+      });
+      await tx.notification.create({
+        data: {
+          title: `Inventory purchase request: ${requestNumber}`,
+          message: "An Inventory Manager submitted a purchase request for review.",
+          type: NotificationType.PURCHASE_APPROVAL,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorId: user.id,
+          actorEmail: user.email,
+          action: "PURCHASE_REQUEST_SUBMITTED",
+          entityType: "PurchaseRequest",
+          entityId: created.id,
+          details: { requestNumber, itemCount: parsed.data.items.length },
+        },
+      });
+      return created;
+    });
+    revalidatePath("/inventory");
+    revalidatePath("/purchasing");
+    return { success: true as const, requestNumber: request.requestNumber };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "Could not submit purchase request.",
+    };
+  }
+}
+
+export async function rejectPurchaseRequest(id: string) {
+  const user = await requirePurchaseAccess();
+  if (!user) return { error: "Unauthorized" as const };
+  const parsed = z.string().uuid().safeParse(id);
+  if (!parsed.success) return { error: "Invalid purchase request." as const };
+  try {
+    await prisma.$transaction(async (tx) => {
+      const request = await tx.purchaseRequest.findUnique({
+        where: { id: parsed.data },
+        select: { status: true },
+      });
+      if (!request || request.status !== PurchaseRequestStatus.PENDING) {
+        throw new Error("Only pending requests can be rejected.");
+      }
+      await tx.purchaseRequest.update({
+        where: { id: parsed.data },
+        data: { status: PurchaseRequestStatus.REJECTED },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorId: user.id,
+          actorEmail: user.email,
+          action: "PURCHASE_REQUEST_REJECTED",
+          entityType: "PurchaseRequest",
+          entityId: parsed.data,
+        },
+      });
+    });
+    revalidatePath("/purchasing");
+    revalidatePath("/inventory");
+    return { success: true as const };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "Could not reject purchase request.",
+    };
+  }
 }
 
 export async function saveSupplier(input: unknown) {
@@ -138,6 +273,8 @@ export async function createPurchaseOrder(input: unknown) {
   if (!user) return { error: "Unauthorized" as const };
   const parsed = z.object({
     supplierId: z.string().uuid(),
+    purchaseRequestId: z.string().uuid().optional(),
+    expectedDeliveryAt: z.string().date().optional(),
     notes: z.string().trim().max(1000).optional(),
     items: z.array(z.object({
       ingredientId: z.string().uuid(),
@@ -160,11 +297,43 @@ export async function createPurchaseOrder(input: unknown) {
       });
       if (!supplier) throw new Error("Supplier not found or inactive.");
 
+      const request = parsed.data.purchaseRequestId
+        ? await tx.purchaseRequest.findUnique({
+            where: { id: parsed.data.purchaseRequestId },
+            include: { items: true },
+          })
+        : null;
+      if (parsed.data.purchaseRequestId && !request) {
+        throw new Error("Purchase request not found.");
+      }
+      if (request && request.status !== PurchaseRequestStatus.PENDING) {
+        throw new Error("This purchase request has already been processed.");
+      }
+      if (request) {
+        const orderIngredientIds = new Set(
+          parsed.data.items.map((item) => item.ingredientId)
+        );
+        if (request.items.some((item) => !orderIngredientIds.has(item.ingredientId))) {
+          throw new Error("The purchase order must include every requested ingredient.");
+        }
+        for (const requestItem of request.items) {
+          const orderItem = parsed.data.items.find(
+            (item) => item.ingredientId === requestItem.ingredientId
+          );
+          if (!orderItem || orderItem.quantity < Number(requestItem.quantity)) {
+            throw new Error("Purchase quantities cannot be lower than the requested quantities.");
+          }
+        }
+      }
+
       const ingredientCount = await tx.ingredient.count({
-        where: { id: { in: parsed.data.items.map((item) => item.ingredientId) } },
+        where: {
+          id: { in: parsed.data.items.map((item) => item.ingredientId) },
+          isActive: true,
+        },
       });
       if (ingredientCount !== parsed.data.items.length) {
-        throw new Error("One or more ingredients were not found.");
+        throw new Error("One or more ingredients were not found or are inactive.");
       }
 
       const totalAmount = parsed.data.items.reduce(
@@ -176,9 +345,13 @@ export async function createPurchaseOrder(input: unknown) {
         data: {
           purchaseNumber,
           supplierId: supplier.id,
+          purchaseRequestId: request?.id,
           status: PurchaseStatus.SUBMITTED,
           totalAmount,
           notes: parsed.data.notes || null,
+          expectedDeliveryAt: parsed.data.expectedDeliveryAt
+            ? new Date(`${parsed.data.expectedDeliveryAt}T23:59:59.999Z`)
+            : null,
           createdById: user.id,
           items: {
             create: parsed.data.items.map((item) => ({
@@ -189,6 +362,12 @@ export async function createPurchaseOrder(input: unknown) {
           },
         },
       });
+      if (request) {
+        await tx.purchaseRequest.update({
+          where: { id: request.id },
+          data: { status: PurchaseRequestStatus.PO_SUBMITTED },
+        });
+      }
       await tx.notification.create({
         data: {
           title: `Purchase approval needed: ${purchaseNumber}`,
@@ -226,7 +405,7 @@ export async function approvePurchaseOrder(id: string) {
     await prisma.$transaction(async (tx) => {
       const purchase = await tx.purchaseOrder.findUnique({
         where: { id },
-        select: { status: true },
+        select: { status: true, purchaseRequestId: true },
       });
       if (!purchase || purchase.status !== PurchaseStatus.SUBMITTED) {
         throw new Error("Only submitted purchase orders can be approved.");
@@ -235,6 +414,12 @@ export async function approvePurchaseOrder(id: string) {
         where: { id },
         data: { status: PurchaseStatus.APPROVED, approvedById: owner.id },
       });
+      if (purchase.purchaseRequestId) {
+        await tx.purchaseRequest.update({
+          where: { id: purchase.purchaseRequestId },
+          data: { status: PurchaseRequestStatus.APPROVED },
+        });
+      }
       await tx.auditLog.create({
         data: {
           actorId: owner.id,
@@ -263,6 +448,8 @@ export async function receivePurchase(input: unknown) {
     items: z.array(z.object({
       purchaseOrderItemId: z.string().uuid(),
       quantity: z.number().finite().positive(),
+      batchNumber: z.string().trim().max(100).optional(),
+      expiresAt: z.string().date().optional(),
     })).min(1).max(100),
   }).safeParse(input);
   if (!parsed.success) {
@@ -313,6 +500,10 @@ export async function receivePurchase(input: unknown) {
                 ingredientId: purchaseItem.ingredientId,
                 quantity: item.quantity,
                 unitCost: purchaseItem.unitCost,
+                batchNumber: item.batchNumber || null,
+                expiresAt: item.expiresAt
+                  ? new Date(`${item.expiresAt}T23:59:59.999Z`)
+                  : null,
               };
             }),
           },
@@ -322,12 +513,16 @@ export async function receivePurchase(input: unknown) {
 
       for (const received of receipt.items) {
         const key = `receipt:${parsed.data.idempotencyKey}:${received.ingredientId}`;
-        await tx.ingredient.update({
-          where: { id: received.ingredientId },
-          data: {
-            quantityOnHand: { increment: received.quantity },
-            unitCost: received.unitCost,
-          },
+        const batch = await addIngredientStock(tx, {
+          ingredientId: received.ingredientId,
+          quantity: Number(received.quantity),
+          unitCost: Number(received.unitCost),
+          batchNumber: received.batchNumber,
+          expiresAt: received.expiresAt,
+        });
+        await tx.purchaseReceiptItem.update({
+          where: { id: received.id },
+          data: { batchId: batch.id },
         });
         await tx.purchaseOrderItem.update({
           where: { id: received.purchaseOrderItemId },
@@ -336,6 +531,7 @@ export async function receivePurchase(input: unknown) {
         await tx.stockMovement.create({
           data: {
             ingredientId: received.ingredientId,
+            batchId: batch.id,
             type: StockMovementType.PURCHASE,
             quantity: received.quantity,
             unitCost: received.unitCost,
@@ -363,6 +559,16 @@ export async function receivePurchase(input: unknown) {
             : PurchaseStatus.PARTIALLY_RECEIVED,
         },
       });
+      if (purchase.purchaseRequestId) {
+        await tx.purchaseRequest.update({
+          where: { id: purchase.purchaseRequestId },
+          data: {
+            status: allReceived
+              ? PurchaseRequestStatus.RECEIVED
+              : PurchaseRequestStatus.PARTIALLY_RECEIVED,
+          },
+        });
+      }
       await tx.notification.create({
         data: {
           title: `Purchase received: ${purchase.purchaseNumber}`,

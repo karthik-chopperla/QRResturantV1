@@ -16,9 +16,33 @@ import {
   PaymentMethod,
   NotificationType,
   TableStatus,
+  Prisma,
 } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { convertDecimalsDeep, toNumber } from "@/lib/decimal";
+import {
+  removeIngredientStock,
+  restoreIngredientStock,
+} from "@/lib/inventory-stock";
+
+function isJsonObject(
+  value: Prisma.JsonValue | null | undefined
+): value is Prisma.JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getCustomizationId(value: Prisma.JsonValue | undefined) {
+  return isJsonObject(value) && typeof value.id === "string"
+    ? value.id
+    : null;
+}
+
+function getCustomizationIds(value: Prisma.JsonValue | undefined) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) =>
+    isJsonObject(entry) && typeof entry.id === "string" ? [entry.id] : []
+  );
+}
 
 // ─── Public ──────────────────────────────────────────────────────────────────
 
@@ -418,7 +442,8 @@ export async function updateOrderStatus(id: string, status: OrderStatus) {
   }
 
   try {
-    const updatedOrder = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
+      const inventoryWarnings: string[] = [];
       const current = await tx.order.findUnique({
         where: { id },
         select: {
@@ -469,64 +494,95 @@ export async function updateOrderStatus(id: string, status: OrderStatus) {
       });
 
       if (
-        status === OrderStatus.PREPARING &&
-        current.status !== OrderStatus.PREPARING
+        status === OrderStatus.READY &&
+        new Set<OrderStatus>([
+          OrderStatus.PLACED,
+          OrderStatus.CONFIRMED,
+          OrderStatus.PREPARING,
+          OrderStatus.PREPARED,
+        ]).has(current.status)
       ) {
         const orderItems = await tx.orderItem.findMany({
           where: { orderId: id },
-          select: { menuItemId: true, quantity: true },
+          select: {
+            menuItemId: true,
+            quantity: true,
+            customizations: true,
+            menuItem: { select: { name: true } },
+          },
         });
         const recipes = await tx.recipeIngredient.findMany({
           where: {
             menuItemId: { in: orderItems.map((item) => item.menuItemId) },
           },
         });
-        const quantityByMenuItem = new Map(
-          orderItems.map((item) => [item.menuItemId, item.quantity])
-        );
         const requirementByIngredient = new Map<string, number>();
-        for (const recipe of recipes) {
-          requirementByIngredient.set(
-            recipe.ingredientId,
-            (requirementByIngredient.get(recipe.ingredientId) ?? 0) +
-              Number(recipe.quantity) *
-                (quantityByMenuItem.get(recipe.menuItemId) ?? 0)
+        for (const item of orderItems) {
+          const customizations = isJsonObject(item.customizations)
+            ? item.customizations
+            : null;
+          const variantId = getCustomizationId(customizations?.variant);
+          const addonIds = getCustomizationIds(customizations?.addons);
+          const itemRecipes = recipes.filter(
+            (recipe) => recipe.menuItemId === item.menuItemId
           );
-        }
+          const variantRecipes = itemRecipes.filter(
+            (recipe) => recipe.variantId === variantId && variantId !== null
+          );
+          const baseRecipes = itemRecipes.filter(
+            (recipe) => recipe.variantId === null && recipe.addonId === null
+          );
+          const selectedRecipes = variantRecipes.length
+            ? variantRecipes
+            : baseRecipes;
+          const addonRecipes = itemRecipes.filter(
+            (recipe) => recipe.addonId !== null && addonIds.includes(recipe.addonId)
+          );
 
-        for (const [ingredientId, quantity] of requirementByIngredient) {
-          const idempotencyKey = `order-consumption:${id}:${ingredientId}`;
-          const alreadyDeducted = await tx.stockMovement.findUnique({
-            where: { idempotencyKey },
-            select: { id: true },
-          });
-          if (alreadyDeducted) continue;
-
-          const updated = await tx.ingredient.updateMany({
-            where: { id: ingredientId, quantityOnHand: { gte: quantity } },
-            data: { quantityOnHand: { decrement: quantity } },
-          });
-          if (updated.count !== 1) {
-            const ingredient = await tx.ingredient.findUnique({
-              where: { id: ingredientId },
-              select: { name: true, unit: true, quantityOnHand: true },
-            });
-            throw new Error(
-              `Insufficient stock for ${ingredient?.name ?? "an ingredient"}: need ${quantity} ${ingredient?.unit ?? ""}, available ${ingredient?.quantityOnHand ?? 0}.`
+          if (selectedRecipes.length === 0) {
+            inventoryWarnings.push(item.menuItem.name);
+          }
+          for (const recipe of [...selectedRecipes, ...addonRecipes]) {
+            requirementByIngredient.set(
+              recipe.ingredientId,
+              (requirementByIngredient.get(recipe.ingredientId) ?? 0) +
+                Number(recipe.quantity) * item.quantity
             );
           }
-          await tx.stockMovement.create({
-            data: {
-              ingredientId,
-              type: "ORDER_CONSUMPTION",
-              quantity: -quantity,
-              reason: `Ingredients used for order ${order.orderNumber ?? order.id}`,
-              referenceType: "Order",
-              referenceId: id,
-              idempotencyKey,
-              actorId: user.id,
-            },
+        }
+
+        const existingConsumptions = await tx.stockMovement.findMany({
+          where: {
+            referenceType: "Order",
+            referenceId: id,
+            type: "ORDER_CONSUMPTION",
+          },
+          select: { ingredientId: true },
+        });
+        const alreadyConsumed = new Set(
+          existingConsumptions.map((movement) => movement.ingredientId)
+        );
+        for (const [ingredientId, quantity] of requirementByIngredient) {
+          if (alreadyConsumed.has(ingredientId)) continue;
+          const { allocations } = await removeIngredientStock(tx, {
+            ingredientId,
+            quantity,
           });
+          for (const allocation of allocations) {
+            await tx.stockMovement.create({
+              data: {
+                ingredientId,
+                batchId: allocation.batchId,
+                type: "ORDER_CONSUMPTION",
+                quantity: -allocation.quantity,
+                reason: `Ingredients used for order ${order.orderNumber ?? order.id}`,
+                referenceType: "Order",
+                referenceId: id,
+                idempotencyKey: `order-consumption:${id}:${ingredientId}:${allocation.batchId}`,
+                actorId: user.id,
+              },
+            });
+          }
         }
       }
 
@@ -537,23 +593,43 @@ export async function updateOrderStatus(id: string, status: OrderStatus) {
             referenceId: id,
             type: "ORDER_CONSUMPTION",
           },
-          select: { id: true, ingredientId: true, quantity: true },
+          select: {
+            id: true,
+            ingredientId: true,
+            quantity: true,
+            batchId: true,
+          },
         });
+        const movementsByIngredient = new Map<
+          string,
+          typeof consumedMovements
+        >();
         for (const movement of consumedMovements) {
-          const idempotencyKey = `order-reversal:${id}:${movement.ingredientId}`;
+          const group = movementsByIngredient.get(movement.ingredientId) ?? [];
+          group.push(movement);
+          movementsByIngredient.set(movement.ingredientId, group);
+        }
+        for (const [ingredientId, movements] of movementsByIngredient) {
+          const idempotencyKey = `order-reversal:${id}:${ingredientId}`;
           const alreadyReversed = await tx.stockMovement.findUnique({
             where: { idempotencyKey },
             select: { id: true },
           });
           if (alreadyReversed) continue;
-          const quantity = Math.abs(Number(movement.quantity));
-          await tx.ingredient.update({
-            where: { id: movement.ingredientId },
-            data: { quantityOnHand: { increment: quantity } },
-          });
+          let quantity = 0;
+          for (const movement of movements) {
+            const restored = Math.abs(Number(movement.quantity));
+            quantity += restored;
+            await restoreIngredientStock(tx, {
+              ingredientId,
+              quantity: restored,
+              batchId: movement.batchId,
+              reason: `Cancelled order ${order.orderNumber ?? order.id}`,
+            });
+          }
           await tx.stockMovement.create({
             data: {
-              ingredientId: movement.ingredientId,
+              ingredientId,
               type: "REVERSAL",
               quantity,
               reason: `Stock restored for cancelled order ${order.orderNumber ?? order.id}`,
@@ -661,11 +737,17 @@ export async function updateOrderStatus(id: string, status: OrderStatus) {
         },
       });
 
-      return order;
+      return { order, inventoryWarnings };
     });
 
+    revalidatePath("/inventory");
+    revalidatePath("/manager");
     revalidatePath("/dashboard/orders");
-    return { success: true, order: updatedOrder };
+    return {
+      success: true,
+      order: result.order,
+      inventoryWarnings: [...new Set(result.inventoryWarnings)],
+    };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Update failed.";
     return { error: message };

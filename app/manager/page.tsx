@@ -74,6 +74,9 @@ export default function ManagerPage() {
         return;
       }
       toast.success(`Order updated to ${getOrderStatusLabel(status)}`);
+      if (result.inventoryWarnings?.length) {
+        toast.warning(`No saved recipe for: ${result.inventoryWarnings.join(", ")}. No ingredients were deducted for those items.`);
+      }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["manager-orders"] }),
         queryClient.invalidateQueries({ queryKey: ["manager-overview"] }),

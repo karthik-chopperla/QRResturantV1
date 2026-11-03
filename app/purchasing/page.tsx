@@ -8,6 +8,7 @@ import {
   createPurchaseOrder,
   getPurchasingData,
   receivePurchase,
+  rejectPurchaseRequest,
   recordSupplierPayment,
   saveSupplier,
   setSupplierActive,
@@ -44,6 +45,8 @@ export default function PurchasingPage() {
   const [editingSupplierId, setEditingSupplierId] = useState<string | null>(null);
   const [supplierId, setSupplierId] = useState("");
   const [notes, setNotes] = useState("");
+  const [purchaseRequestId, setPurchaseRequestId] = useState("");
+  const [expectedDeliveryAt, setExpectedDeliveryAt] = useState("");
   const [lines, setLines] = useState([
     { ingredientId: "", quantity: "", unitCost: "" },
   ]);
@@ -51,6 +54,8 @@ export default function PurchasingPage() {
   const ingredients = data && "ingredients" in data ? data.ingredients ?? [] : [];
   const purchaseOrders =
     data && "purchaseOrders" in data ? data.purchaseOrders ?? [] : [];
+  const purchaseRequests =
+    data && "purchaseRequests" in data ? data.purchaseRequests ?? [] : [];
 
   useEffect(() => {
     void getCurrentUser().then((user) => setUserRole(user?.role ?? null));
@@ -89,12 +94,43 @@ export default function PurchasingPage() {
         quantity: Number(line.quantity),
         unitCost: Number(line.unitCost),
       }));
-    const result = await createPurchaseOrder({ supplierId, notes, items });
+    const result = await createPurchaseOrder({
+      supplierId,
+      notes,
+      items,
+      ...(purchaseRequestId ? { purchaseRequestId } : {}),
+      ...(expectedDeliveryAt ? { expectedDeliveryAt } : {}),
+    });
     if ("error" in result) toast.error(result.error);
     else {
       toast.success(`Purchase ${result.purchaseNumber} submitted for approval`);
       setLines([{ ingredientId: "", quantity: "", unitCost: "" }]);
       setNotes("");
+      setPurchaseRequestId("");
+      setExpectedDeliveryAt("");
+      await refresh();
+    }
+  };
+
+  const handleSelectRequest = (id: string) => {
+    setPurchaseRequestId(id);
+    const request = purchaseRequests.find((item) => item.id === id);
+    if (!request) return;
+    setLines(request.items.map((item) => ({
+      ingredientId: item.ingredientId,
+      quantity: String(item.quantity),
+      unitCost: String(
+        ingredients.find((ingredient) => ingredient.id === item.ingredientId)?.unitCost ?? 0
+      ),
+    })));
+    setNotes(`Purchase request ${request.requestNumber}`);
+  };
+
+  const handleRejectRequest = async (id: string) => {
+    const result = await rejectPurchaseRequest(id);
+    if ("error" in result) toast.error(result.error);
+    else {
+      toast.success("Purchase request rejected");
       await refresh();
     }
   };
@@ -121,7 +157,12 @@ export default function PurchasingPage() {
       toast.error("There are no remaining quantities to receive.");
       return;
     }
-    const received: { purchaseOrderItemId: string; quantity: number }[] = [];
+    const received: {
+      purchaseOrderItemId: string;
+      quantity: number;
+      batchNumber?: string;
+      expiresAt?: string;
+    }[] = [];
     for (const { item, remaining } of outstandingItems) {
       const quantity = window.prompt(
         `Quantity received for ${item.ingredient.name} (remaining ${remaining} ${item.ingredient.unit})`,
@@ -133,7 +174,22 @@ export default function PurchasingPage() {
         toast.error(`Enter a quantity greater than 0 and no more than ${remaining}.`);
         return;
       }
-      received.push({ purchaseOrderItemId: item.id, quantity: parsedQuantity });
+      const batchNumber = window.prompt(`Batch number for ${item.ingredient.name} (optional)`);
+      if (batchNumber === null) return;
+      const expiresAt = window.prompt(
+        `Expiry date for ${item.ingredient.name} (YYYY-MM-DD, optional)`
+      );
+      if (expiresAt === null) return;
+      if (expiresAt && !/^\d{4}-\d{2}-\d{2}$/.test(expiresAt)) {
+        toast.error("Enter expiry as YYYY-MM-DD.");
+        return;
+      }
+      received.push({
+        purchaseOrderItemId: item.id,
+        quantity: parsedQuantity,
+        ...(batchNumber.trim() ? { batchNumber: batchNumber.trim() } : {}),
+        ...(expiresAt ? { expiresAt } : {}),
+      });
     }
     if (!window.confirm("Confirm these quantities were physically received? This updates inventory.")) return;
     const result = await receivePurchase({
@@ -224,11 +280,65 @@ export default function PurchasingPage() {
         </Card>
 
         <Card>
+          <CardContent className="space-y-3 p-4">
+            <div>
+              <h2 className="text-lg font-semibold">Inventory Purchase Requests</h2>
+              <p className="text-sm text-muted-foreground">
+                Review requests from Inventory Managers. Linking a request creates a normal purchase order and keeps approval and receiving in the existing workflow.
+              </p>
+            </div>
+            {purchaseRequests.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No purchase requests submitted.</p>
+            ) : purchaseRequests.map((request) => (
+              <div key={request.id} className="flex flex-wrap items-start justify-between gap-3 border-b pb-3 last:border-0">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <strong>{request.requestNumber}</strong>
+                    <Badge variant="secondary">{request.status.replaceAll("_", " ")}</Badge>
+                  </div>
+                  <p className="text-sm">{request.items.map((item) => `${item.ingredient.name}: ${Number(item.quantity)} ${item.ingredient.unit}`).join(" · ")}</p>
+                  {request.notes && <p className="text-sm text-muted-foreground">{request.notes}</p>}
+                  {request.purchaseOrder && (
+                    <p className="text-xs text-muted-foreground">
+                      {request.purchaseOrder.purchaseNumber} · {request.purchaseOrder.status}
+                      {request.purchaseOrder.expectedDeliveryAt
+                        ? ` · Expected ${formatDate(request.purchaseOrder.expectedDeliveryAt)}`
+                        : ""}
+                    </p>
+                  )}
+                </div>
+                {request.status === "PENDING" && (
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => handleSelectRequest(request.id)}>Create purchase order</Button>
+                    <Button size="sm" variant="outline" onClick={() => void handleRejectRequest(request.id)}>Reject</Button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card>
           <CardContent className="space-y-4 p-4">
             <div>
               <h2 className="text-lg font-semibold">Create Purchase Order</h2>
               <p className="text-sm text-muted-foreground">Submitting a purchase order does not add stock. The Owner must approve before receiving.</p>
             </div>
+            {purchaseRequests.some((request) => request.status === "PENDING") && (
+              <div className="space-y-1">
+                <Label>Link inventory request (optional)</Label>
+                <select
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                  value={purchaseRequestId}
+                  onChange={(event) => handleSelectRequest(event.target.value)}
+                >
+                  <option value="">No request</option>
+                  {purchaseRequests.filter((request) => request.status === "PENDING").map((request) => (
+                    <option key={request.id} value={request.id}>{request.requestNumber}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1">
                 <Label>Supplier</Label>
@@ -238,6 +348,10 @@ export default function PurchasingPage() {
                 </select>
               </div>
               <Input aria-label="Purchase notes" placeholder="Notes (optional)" value={notes} onChange={(event) => setNotes(event.target.value)} />
+              <div className="space-y-1">
+                <Label htmlFor="expected-delivery">Expected delivery date</Label>
+                <Input id="expected-delivery" type="date" value={expectedDeliveryAt} onChange={(event) => setExpectedDeliveryAt(event.target.value)} />
+              </div>
             </div>
             {lines.map((line, index) => (
               <div key={index} className="grid gap-2 sm:grid-cols-[1fr_150px_150px_auto]">
@@ -271,6 +385,8 @@ export default function PurchasingPage() {
                     <div>
                       <div className="flex flex-wrap items-center gap-2"><strong>{purchase.purchaseNumber}</strong><Badge variant="secondary">{purchase.status}</Badge></div>
                       <p className="text-sm text-muted-foreground">{purchase.supplier.name} · {formatDate(purchase.createdAt)}</p>
+                      {purchase.purchaseRequest && <p className="text-xs text-muted-foreground">Request: {purchase.purchaseRequest.requestNumber}</p>}
+                      {purchase.expectedDeliveryAt && <p className="text-xs text-muted-foreground">Expected delivery: {formatDate(purchase.expectedDeliveryAt)}</p>}
                       <p className="text-sm">{purchase.items.map((item) => `${item.ingredient.name}: ${Number(item.receivedQuantity)}/${Number(item.orderedQuantity)} ${item.ingredient.unit}`).join(" · ")}</p>
                       {purchase.receipts.length > 0 && <p className="text-xs text-muted-foreground">Receipts: {purchase.receipts.map((receipt) => formatDate(receipt.receivedAt)).join(", ")}</p>}
                       <p className="text-sm">Total {formatCurrency(purchase.totalAmount)} · Paid {formatCurrency(paid)} · Outstanding {formatCurrency(Math.max(0, Number(purchase.totalAmount) - paid))}</p>
