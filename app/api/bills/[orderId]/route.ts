@@ -3,6 +3,7 @@ import { generateBillHtml } from "@/lib/bill-generator";
 import { getCurrentUser } from "@/actions/auth";
 import prisma from "@/lib/prisma";
 import { verifyTableToken } from "@/lib/table-token";
+import { Role } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 
@@ -17,9 +18,13 @@ export async function GET(
   }
 
   const user = await getCurrentUser();
-  let authorized = Boolean(user);
+  let authorized =
+    user?.role === Role.RESTAURANT_OWNER ||
+    user?.role === Role.MANAGER ||
+    user?.role === Role.CASHIER ||
+    user?.role === Role.ACCOUNTANT;
 
-  if (!authorized) {
+  if (!user) {
     const tableToken = new URL(_request.url).searchParams.get("table");
     if (tableToken) {
       const tableId = verifyTableToken(tableToken);
@@ -34,7 +39,7 @@ export async function GET(
   }
 
   if (!authorized) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "Forbidden" }, { status: user ? 403 : 401 });
   }
 
   const html = await generateBillHtml(orderId);

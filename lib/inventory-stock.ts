@@ -1,6 +1,82 @@
 import type { Prisma } from "@prisma/client";
+import { NotificationType } from "@prisma/client";
 
 type Transaction = Prisma.TransactionClient;
+
+export async function syncLowStockNotification(
+  tx: Transaction,
+  ingredientId: string
+) {
+  const ingredient = await tx.ingredient.findUnique({
+    where: { id: ingredientId },
+    select: {
+      id: true,
+      name: true,
+      unit: true,
+      quantityOnHand: true,
+      minimumQuantity: true,
+    },
+  });
+  if (!ingredient) throw new Error("Ingredient not found while updating stock alerts.");
+
+  const marker = `[ingredient:${ingredient.id}]`;
+  const quantity = Number(ingredient.quantityOnHand);
+  const minimum = Number(ingredient.minimumQuantity);
+  const message = `${marker} Available ${quantity} ${ingredient.unit}; minimum is ${minimum} ${ingredient.unit}.`;
+  const notifications = await tx.notification.findMany({
+    where: {
+      type: NotificationType.LOW_STOCK,
+      OR: [
+        { message: { contains: marker } },
+        { title: `Low stock: ${ingredient.name}` },
+      ],
+    },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, message: true },
+  });
+  const unresolved = notifications.filter(
+    (notification) => !notification.message.startsWith("Resolved:")
+  );
+
+  if (quantity <= minimum) {
+    const [existing, ...duplicates] = unresolved;
+    if (existing) {
+      await tx.notification.update({
+        where: { id: existing.id },
+        data: { title: `Low stock: ${ingredient.name}`, message },
+      });
+      for (const duplicate of duplicates) {
+        await tx.notification.update({
+          where: { id: duplicate.id },
+          data: {
+            isRead: true,
+            message: `Resolved: duplicate alert consolidated. ${duplicate.message}`,
+          },
+        });
+      }
+    } else {
+      await tx.notification.create({
+        data: {
+          title: `Low stock: ${ingredient.name}`,
+          message,
+          type: NotificationType.LOW_STOCK,
+        },
+      });
+    }
+    return;
+  }
+
+  for (const notification of unresolved) {
+    await tx.notification.update({
+      where: { id: notification.id },
+      data: {
+        title: `Stock restored: ${ingredient.name}`,
+        message: `Resolved: ${message}`,
+        isRead: true,
+      },
+    });
+  }
+}
 
 export async function addIngredientStock(
   tx: Transaction,
@@ -31,6 +107,7 @@ export async function addIngredientStock(
     },
     select: { id: true },
   });
+  await syncLowStockNotification(tx, ingredient.id);
   return batch;
 }
 
@@ -102,6 +179,7 @@ export async function removeIngredientStock(
   if (updatedIngredient.count !== 1) {
     throw new Error(`Stock changed while updating ${ingredient.name}. Please retry.`);
   }
+  await syncLowStockNotification(tx, input.ingredientId);
   return { ingredient, allocations };
 }
 
@@ -144,4 +222,5 @@ export async function restoreIngredientStock(
     where: { id: input.ingredientId },
     data: { quantityOnHand: { increment: input.quantity } },
   });
+  await syncLowStockNotification(tx, input.ingredientId);
 }

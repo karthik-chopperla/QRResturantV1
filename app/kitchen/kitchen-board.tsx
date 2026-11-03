@@ -1,21 +1,22 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getOrders, updateOrderStatus } from "@/actions/orders";
+import { getKitchenOrders, updateOrderStatus } from "@/actions/orders";
 import { StaffHeader } from "@/components/layout/dashboard-sidebar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { formatCurrency, getOrderStatusLabel } from "@/lib/format";
+import { getOrderStatusLabel } from "@/lib/format";
 import { OrderStatus, Role } from "@prisma/client";
 import { toast } from "sonner";
-import { ChefHat, Clock, CheckCircle, RefreshCw, Volume2, VolumeX } from "lucide-react";
+import { AlertCircle, ChefHat, Clock, CheckCircle, RefreshCw, Volume2, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { unlockAudio, playNewOrder } from "@/lib/sound";
 
 const KITCHEN_STATUSES = [
   OrderStatus.PLACED,
+  OrderStatus.CONFIRMED,
   OrderStatus.PREPARING,
   OrderStatus.PREPARED,
   OrderStatus.READY,
@@ -29,7 +30,7 @@ export default function KitchenBoard({ userRole }: { userRole: Role }) {
 
   const { data: orders = [], refetch, isLoading } = useQuery({
     queryKey: ["kitchen-orders"],
-    queryFn: () => getOrders(),
+    queryFn: () => getKitchenOrders(),
     refetchInterval: 8000,
   });
 
@@ -58,9 +59,6 @@ export default function KitchenBoard({ userRole }: { userRole: Role }) {
     if (result.error) toast.error(result.error);
     else {
       toast.success(`Order → ${getOrderStatusLabel(status)}`);
-      if (result.inventoryWarnings?.length) {
-        toast.warning(`No saved recipe for: ${result.inventoryWarnings.join(", ")}. No ingredients were deducted for those items.`);
-      }
       queryClient.invalidateQueries({ queryKey: ["kitchen-orders"] });
     }
   };
@@ -68,17 +66,18 @@ export default function KitchenBoard({ userRole }: { userRole: Role }) {
   const getNextStatus = (current: OrderStatus): OrderStatus | null => {
     const flow: Partial<Record<OrderStatus, OrderStatus>> = {
       [OrderStatus.PLACED]: OrderStatus.PREPARING,
+      [OrderStatus.CONFIRMED]: OrderStatus.PREPARING,
       [OrderStatus.PREPARING]: OrderStatus.PREPARED,
       [OrderStatus.PREPARED]: OrderStatus.READY,
     };
     return flow[current] || null;
   };
 
-  const columns = [
-    { status: OrderStatus.PLACED, label: "New Orders", color: "border-blue-500" },
-    { status: OrderStatus.PREPARING, label: "Preparing", color: "border-amber-500" },
-    { status: OrderStatus.PREPARED, label: "Prepared", color: "border-violet-500" },
-    { status: OrderStatus.READY, label: "Ready", color: "border-emerald-500" },
+  const columns: { statuses: OrderStatus[]; label: string; color: string }[] = [
+    { statuses: [OrderStatus.PLACED, OrderStatus.CONFIRMED], label: "New Orders", color: "border-blue-500" },
+    { statuses: [OrderStatus.PREPARING], label: "Preparing", color: "border-amber-500" },
+    { statuses: [OrderStatus.PREPARED], label: "Prepared", color: "border-violet-500" },
+    { statuses: [OrderStatus.READY], label: "Ready", color: "border-emerald-500" },
   ];
 
   return (
@@ -110,10 +109,10 @@ export default function KitchenBoard({ userRole }: { userRole: Role }) {
         <p className="py-20 text-center text-muted-foreground">Loading orders...</p>
       ) : (
         <div className="grid gap-3 p-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-4 sm:p-4">
-          {columns.map(({ status, label, color }) => {
-            const columnOrders = kitchenOrders.filter((o) => o.status === status);
+          {columns.map(({ statuses, label, color }) => {
+            const columnOrders = kitchenOrders.filter((o) => statuses.includes(o.status));
             return (
-              <div key={status} className={`rounded-xl border-t-4 ${color} bg-card p-3`}>
+              <div key={label} className={`rounded-xl border-t-4 ${color} bg-card p-3`}>
                 <h2 className="mb-3 flex items-center gap-2 font-semibold">
                   <ChefHat className="size-4" />
                   {label}
@@ -138,20 +137,31 @@ export default function KitchenBoard({ userRole }: { userRole: Role }) {
                               <Clock className="size-3" />{elapsed}m ago
                             </span>
                           </div>
-                          <p className="text-sm text-muted-foreground">{order.customerName}</p>
+                          {order.notes && <p className="text-sm text-amber-700">{order.notes}</p>}
                           <div className="mt-2 space-y-1">
                             {order.orderItems.map((item) => (
                               <p key={item.id} className="text-sm font-medium">
                                 {item.quantity}x {item.menuItem.name}
+                                {item.variantName && <span className="block text-xs text-muted-foreground">Variant: {item.variantName}</span>}
+                                {item.addonNames.length > 0 && <span className="block text-xs text-muted-foreground">Add-ons: {item.addonNames.join(", ")}</span>}
                                 {item.notes && <span className="block text-xs text-amber-600">Note: {item.notes}</span>}
                               </p>
                             ))}
                           </div>
-                          <p className="mt-2 text-sm font-bold">{formatCurrency(order.totalAmount)}</p>
+                          {order.missingRecipeItems.length > 0 && (
+                            <div role="alert" className="mt-3 flex gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-200">
+                              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+                              <span>
+                                <strong>Recipe required before Ready.</strong>{" "}
+                                Missing recipes: {order.missingRecipeItems.join(", ")}. Ask the Owner to save the recipe in Inventory.
+                              </span>
+                            </div>
+                          )}
                           {nextStatus && (
                             <Button
                               className="mt-3 w-full"
                               size="sm"
+                              disabled={nextStatus === OrderStatus.READY && order.missingRecipeItems.length > 0}
                               onClick={() => handleStatusUpdate(order.id, nextStatus)}
                             >
                               <CheckCircle className="mr-2 size-4" />

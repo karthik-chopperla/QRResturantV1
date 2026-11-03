@@ -9,6 +9,7 @@ import { convertDecimalsDeep } from "@/lib/decimal";
 import {
   addIngredientStock,
   removeIngredientStock,
+  syncLowStockNotification,
 } from "@/lib/inventory-stock";
 
 const ingredientInput = z.object({
@@ -30,7 +31,7 @@ export async function getInventoryData() {
   const user = await requireInventoryAccess();
   if (!user) return { error: "Unauthorized" as const };
 
-  const [ingredients, categories, movements, menuItems, purchaseRequests] = await Promise.all([
+  const [ingredients, categories, movements, menuItems, purchaseRequests, lowStockNotifications] = await Promise.all([
     prisma.ingredient.findMany({
       include: {
         category: true,
@@ -79,6 +80,11 @@ export async function getInventoryData() {
       orderBy: { createdAt: "desc" },
       take: 100,
     }),
+    prisma.notification.findMany({
+      where: { type: NotificationType.LOW_STOCK },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    }),
   ]);
   return convertDecimalsDeep({
     ingredients,
@@ -86,6 +92,7 @@ export async function getInventoryData() {
     movements,
     menuItems,
     purchaseRequests,
+    lowStockNotifications,
   });
 }
 
@@ -184,6 +191,7 @@ export async function saveIngredient(
             }
           }
         }
+        await syncLowStockNotification(tx, updated.id);
         return updated;
       }
 
@@ -217,6 +225,7 @@ export async function saveIngredient(
           },
         });
       }
+      await syncLowStockNotification(tx, created.id);
       return created;
     });
 
@@ -307,21 +316,6 @@ export async function adjustIngredientStock(input: {
         });
       }
 
-      const updatedQuantity =
-        Number(ingredient.quantityOnHand) +
-        (isWastage ? -parsed.data.quantity : parsed.data.quantity);
-
-      if (
-        updatedQuantity <= Number(ingredient.minimumQuantity)
-      ) {
-        await tx.notification.create({
-          data: {
-            title: `Low stock: ${ingredient.name}`,
-            message: `Available ${updatedQuantity} ${ingredient.unit}; minimum is ${ingredient.minimumQuantity} ${ingredient.unit}.`,
-            type: NotificationType.LOW_STOCK,
-          },
-        });
-      }
     });
     revalidatePath("/inventory");
     revalidatePath("/manager");
@@ -497,6 +491,7 @@ export async function recordExpiredBatchWastage(
       if (updatedIngredient.count !== 1) {
         throw new Error("Ingredient stock changed. Refresh and retry.");
       }
+      await syncLowStockNotification(tx, batch.ingredientId);
       await tx.stockMovement.create({
         data: {
           ingredientId: batch.ingredientId,

@@ -43,9 +43,17 @@ export async function getCashierData() {
             notIn: [OrderStatus.COMPLETED, OrderStatus.CANCELLED, OrderStatus.COLLECTED],
           },
         },
-        include: {
+        select: {
+          id: true,
+          orderNumber: true,
+          orderType: true,
+          status: true,
+          paymentStatus: true,
+          paymentMethod: true,
+          customerName: true,
+          totalAmount: true,
+          createdAt: true,
           table: { select: { number: true } },
-          invoices: true,
         },
         orderBy: { createdAt: "desc" },
         take: 100,
@@ -53,6 +61,7 @@ export async function getCashierData() {
       prisma.cashRegisterSession.findFirst({
         where: { cashierId: user.id, closedAt: null },
         orderBy: { openedAt: "desc" },
+        select: { id: true, openedAt: true },
       }),
       prisma.settings.findUnique({
         where: { id: "singleton" },

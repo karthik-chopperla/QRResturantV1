@@ -2,12 +2,13 @@
 
 import prisma from "@/lib/prisma";
 import { getRazorpayClient } from "@/lib/razorpay";
-import { resend } from "@/lib/resend";
 import {
   requireCashier,
   requireOrderStatusAccess,
   requireOrdersViewer,
+  canAccessKitchen,
 } from "@/lib/roles";
+import { getCurrentUser } from "./auth";
 import { validateOffer } from "./offers";
 import { createOrderSchema, type CreateOrderInput } from "@/schemas";
 import {
@@ -17,9 +18,16 @@ import {
   NotificationType,
   TableStatus,
   Prisma,
+  Role,
 } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { convertDecimalsDeep, toNumber } from "@/lib/decimal";
+import { getNextOrderStatuses } from "@/lib/order-transitions";
+import {
+  completeServedDineInOrder,
+  releaseTableIfNoOpenOrders,
+  sendCompletedOrderReceipt,
+} from "@/lib/order-lifecycle";
 import {
   removeIngredientStock,
   restoreIngredientStock,
@@ -41,6 +49,19 @@ function getCustomizationIds(value: Prisma.JsonValue | undefined) {
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry) =>
     isJsonObject(entry) && typeof entry.id === "string" ? [entry.id] : []
+  );
+}
+
+function getCustomizationName(value: Prisma.JsonValue | undefined) {
+  return isJsonObject(value) && typeof value.name === "string"
+    ? value.name
+    : null;
+}
+
+function getCustomizationNames(value: Prisma.JsonValue | undefined) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) =>
+    isJsonObject(entry) && typeof entry.name === "string" ? [entry.name] : []
   );
 }
 
@@ -296,6 +317,17 @@ export async function cancelUnpaidOrder(orderId: string, tableId: string) {
  */
 export async function getCustomerOrder(id: string) {
   if (!id || typeof id !== "string") return null;
+  const user = await getCurrentUser();
+  if (
+    user &&
+    [
+      Role.CASHIER,
+      Role.SERVICE_STAFF,
+      Role.CHEF_KITCHEN_STAFF,
+    ].some((restrictedRole) => restrictedRole === user.role)
+  ) {
+    return null;
+  }
   try {
     const order = await prisma.order.findUnique({
       where: { id },
@@ -434,74 +466,170 @@ export async function getOrders() {
   }
 }
 
+export async function getKitchenOrders() {
+  const user = await getCurrentUser();
+  if (!user || !canAccessKitchen(user.role)) return [];
+
+  try {
+    const orders = await prisma.order.findMany({
+      where: {
+        status: {
+          in: [
+            OrderStatus.PLACED,
+            OrderStatus.CONFIRMED,
+            OrderStatus.PREPARING,
+            OrderStatus.PREPARED,
+            OrderStatus.READY,
+          ],
+        },
+      },
+      select: {
+        id: true,
+        orderNumber: true,
+        orderType: true,
+        status: true,
+        notes: true,
+        createdAt: true,
+        table: { select: { number: true } },
+        orderItems: {
+          select: {
+            id: true,
+            quantity: true,
+            notes: true,
+            customizations: true,
+            menuItem: {
+              select: {
+                id: true,
+                name: true,
+                recipeItems: {
+                  select: { variantId: true, addonId: true },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: "asc" },
+      take: 100,
+    });
+
+    return orders.map((order) => {
+      const orderItems = order.orderItems.map((item) => {
+        const customizations = isJsonObject(item.customizations)
+          ? item.customizations
+          : null;
+        const variant = customizations?.variant;
+        const variantId = getCustomizationId(variant);
+        const itemRecipes = item.menuItem.recipeItems;
+        const variantRecipes = itemRecipes.filter(
+          (recipe) => recipe.variantId === variantId && recipe.addonId === null
+        );
+        const hasBaseRecipe = itemRecipes.some(
+          (recipe) => recipe.variantId === null && recipe.addonId === null
+        );
+        const hasRecipe = variantRecipes.length > 0 || hasBaseRecipe;
+
+        return {
+          id: item.id,
+          quantity: item.quantity,
+          notes: item.notes,
+          menuItem: { id: item.menuItem.id, name: item.menuItem.name },
+          variantName: getCustomizationName(variant),
+          addonNames: getCustomizationNames(customizations?.addons),
+          missingRecipe: !hasRecipe,
+        };
+      });
+
+      return {
+        id: order.id,
+        orderNumber: order.orderNumber,
+        orderType: order.orderType,
+        status: order.status,
+        notes: order.notes,
+        createdAt: order.createdAt,
+        table: order.table,
+        orderItems,
+        missingRecipeItems: [
+          ...new Set(
+            orderItems
+              .filter((item) => item.missingRecipe)
+              .map((item) => item.menuItem.name)
+          ),
+        ],
+      };
+    });
+  } catch (error) {
+    console.error("getKitchenOrders error:", error);
+    return [];
+  }
+}
+
 export async function updateOrderStatus(id: string, status: OrderStatus) {
-  const user = await requireOrderStatusAccess(status);
-  if (!user) return { error: "Unauthorized" };
   if (!Object.values(OrderStatus).includes(status)) {
     return { error: "Invalid order status." };
   }
+  if (status === OrderStatus.COMPLETED) {
+    return { error: "Eligible dine-in orders are completed automatically after service and payment." };
+  }
+  const user = await requireOrderStatusAccess(status);
+  if (!user) return { error: "Unauthorized" };
 
   try {
     const result = await prisma.$transaction(async (tx) => {
-      const inventoryWarnings: string[] = [];
       const current = await tx.order.findUnique({
         where: { id },
         select: {
           status: true,
           orderType: true,
           paymentStatus: true,
+          tableId: true,
         },
       });
       if (!current) throw new Error("Order not found.");
 
-      if (user.role === "CHEF_KITCHEN_STAFF") {
-        const allowedTransitions: Partial<Record<OrderStatus, OrderStatus>> = {
-          [OrderStatus.PLACED]: OrderStatus.PREPARING,
-          [OrderStatus.CONFIRMED]: OrderStatus.PREPARING,
-          [OrderStatus.PREPARING]: OrderStatus.PREPARED,
-          [OrderStatus.PREPARED]: OrderStatus.READY,
-        };
-        if (allowedTransitions[current.status] !== status) {
-          throw new Error("Kitchen staff can only advance an order to its next preparation step.");
-        }
-      }
-
-      if (user.role === "SERVICE_STAFF") {
+      const isOwnerOrManager =
+        user.role === Role.RESTAURANT_OWNER || user.role === Role.MANAGER;
+      if (status === OrderStatus.CANCELLED) {
+        if (!isOwnerOrManager) throw new Error("Only the Owner or Manager can cancel an order.");
         if (
-          current.status !== OrderStatus.READY ||
-          (status === OrderStatus.SERVED && current.orderType !== "DINE_IN") ||
-          (status === OrderStatus.COLLECTED && current.orderType !== "TAKEAWAY")
+          current.status === OrderStatus.COMPLETED ||
+          current.status === OrderStatus.CANCELLED
         ) {
-          throw new Error("Service staff can only complete the handover for a ready order of the matching type.");
+          throw new Error("This order can no longer be cancelled.");
+        }
+        if (current.paymentStatus === PaymentStatus.SUCCESS) {
+          throw new Error("This paid order cannot be cancelled as a refund. Process a provider-confirmed refund first.");
+        }
+      } else {
+        const nextStatuses = getNextOrderStatuses(
+          current.status,
+          current.orderType
+        );
+        if (!nextStatuses.includes(status)) {
+          throw new Error("That order status transition is not allowed.");
+        }
+        if (
+          user.role === Role.CHEF_KITCHEN_STAFF &&
+          ![
+            OrderStatus.PREPARING,
+            OrderStatus.PREPARED,
+            OrderStatus.READY,
+          ].some((allowedStatus) => allowedStatus === status)
+        ) {
+          throw new Error("Kitchen staff can only advance preparation statuses.");
+        }
+        if (
+          user.role === Role.SERVICE_STAFF &&
+          ![OrderStatus.SERVED, OrderStatus.COLLECTED].some(
+            (allowedStatus) => allowedStatus === status
+          )
+        ) {
+          throw new Error("Service staff can only complete a ready-order handover.");
         }
       }
 
-      if (
-        status === OrderStatus.CANCELLED &&
-        current.paymentStatus === PaymentStatus.SUCCESS
-      ) {
-        throw new Error("This paid order cannot be cancelled as a refund. Process a provider-confirmed refund first.");
-      }
-
-      const order = await tx.order.update({
-        where: { id },
-        data: {
-          status,
-          ...(status === OrderStatus.SERVED && { servedAt: new Date() }),
-          ...(status === OrderStatus.COLLECTED && { collectedAt: new Date() }),
-        },
-        include: { table: true },
-      });
-
-      if (
-        status === OrderStatus.READY &&
-        new Set<OrderStatus>([
-          OrderStatus.PLACED,
-          OrderStatus.CONFIRMED,
-          OrderStatus.PREPARING,
-          OrderStatus.PREPARED,
-        ]).has(current.status)
-      ) {
+      const requirementByIngredient = new Map<string, number>();
+      if (status === OrderStatus.READY) {
         const orderItems = await tx.orderItem.findMany({
           where: { orderId: id },
           select: {
@@ -516,7 +644,7 @@ export async function updateOrderStatus(id: string, status: OrderStatus) {
             menuItemId: { in: orderItems.map((item) => item.menuItemId) },
           },
         });
-        const requirementByIngredient = new Map<string, number>();
+        const missingRecipes: string[] = [];
         for (const item of orderItems) {
           const customizations = isJsonObject(item.customizations)
             ? item.customizations
@@ -527,7 +655,10 @@ export async function updateOrderStatus(id: string, status: OrderStatus) {
             (recipe) => recipe.menuItemId === item.menuItemId
           );
           const variantRecipes = itemRecipes.filter(
-            (recipe) => recipe.variantId === variantId && variantId !== null
+            (recipe) =>
+              recipe.variantId === variantId &&
+              recipe.addonId === null &&
+              variantId !== null
           );
           const baseRecipes = itemRecipes.filter(
             (recipe) => recipe.variantId === null && recipe.addonId === null
@@ -536,11 +667,14 @@ export async function updateOrderStatus(id: string, status: OrderStatus) {
             ? variantRecipes
             : baseRecipes;
           const addonRecipes = itemRecipes.filter(
-            (recipe) => recipe.addonId !== null && addonIds.includes(recipe.addonId)
+            (recipe) =>
+              recipe.variantId === null &&
+              recipe.addonId !== null &&
+              addonIds.includes(recipe.addonId)
           );
 
           if (selectedRecipes.length === 0) {
-            inventoryWarnings.push(item.menuItem.name);
+            missingRecipes.push(item.menuItem.name);
           }
           for (const recipe of [...selectedRecipes, ...addonRecipes]) {
             requirementByIngredient.set(
@@ -550,7 +684,38 @@ export async function updateOrderStatus(id: string, status: OrderStatus) {
             );
           }
         }
+        if (missingRecipes.length > 0) {
+          throw new Error(
+            `Cannot mark Ready. Add a saved recipe for: ${[...new Set(missingRecipes)].join(", ")}.`
+          );
+        }
+      }
 
+      const updateResult = await tx.order.updateMany({
+        where: {
+          id,
+          status: current.status,
+          ...(status === OrderStatus.CANCELLED
+            ? { paymentStatus: current.paymentStatus }
+            : {}),
+        },
+        data: {
+          status,
+          ...(status === OrderStatus.SERVED && { servedAt: new Date() }),
+          ...(status === OrderStatus.COLLECTED && { collectedAt: new Date() }),
+        },
+      });
+      if (updateResult.count !== 1) {
+        throw new Error("The order changed before this update was applied. Refresh and retry.");
+      }
+
+      const order = await tx.order.findUnique({
+        where: { id },
+        include: { table: true },
+      });
+      if (!order) throw new Error("Order not found.");
+
+      if (status === OrderStatus.READY) {
         const existingConsumptions = await tx.stockMovement.findMany({
           where: {
             referenceType: "Order",
@@ -653,78 +818,24 @@ export async function updateOrderStatus(id: string, status: OrderStatus) {
             type: NotificationType.KITCHEN_READY,
           },
         });
-      } else if (status === OrderStatus.COMPLETED) {
-        if (order.tableId) {
-          await tx.table.update({
-            where: { id: order.tableId },
-            data: { status: TableStatus.AVAILABLE },
-          });
-        }
-
-        const invoiceNumber = `INV-${order.orderNumber ?? order.id}`;
-
-        await tx.invoice.upsert({
-          where: { orderId: order.id },
-          update: {},
-          create: {
-            orderId: order.id,
-            invoiceNumber,
-            amount: order.totalAmount,
-            taxAmount: order.gstAmount,
-            discountAmount: order.discountAmount,
-          },
-        });
-
-        // Send email receipt only if Resend is configured and a valid email exists
-        if (resend) {
-          const customerEmail = order.customerName.includes("@")
-            ? order.customerName // legacy: email stored in customerName field
-            : null;
-
-          // In production, you should store customerEmail in its own column.
-          // Until then we only send if the name looks like an email.
-          if (customerEmail) {
-            try {
-              await resend.emails.send({
-                from: process.env.RESEND_FROM_EMAIL || "receipts@resend.dev",
-                to: customerEmail,
-                subject: `Invoice ${invoiceNumber} | QRFast`,
-                html: `<p>Dear Customer,</p><p>Thank you for dining with us! Here is your bill summary:</p><ul><li>Invoice: ${invoiceNumber}</li><li>Subtotal: ₹${toNumber(order.subtotal)}</li><li>Discount: ₹${toNumber(order.discountAmount)}</li><li>GST: ₹${toNumber(order.gstAmount)}</li><li>Service Charge: ₹${toNumber(order.serviceChargeAmount)}</li><li><strong>Grand Total: ₹${toNumber(order.totalAmount)}</strong></li></ul><p>We hope to see you again soon!</p>`,
-              });
-            } catch (resendError) {
-              console.error("Email send failed:", resendError);
-              // Non-fatal — order is still completed
-            }
-          }
-        }
       } else if (status === OrderStatus.CANCELLED) {
+        await tx.payment.updateMany({
+          where: { orderId: id, status: PaymentStatus.PENDING },
+          data: { status: PaymentStatus.FAILED },
+        });
+        await tx.order.update({
+          where: { id },
+          data: { paymentStatus: PaymentStatus.FAILED },
+        });
         if (order.tableId) {
-          await tx.table.update({
-            where: { id: order.tableId },
-            data: { status: TableStatus.AVAILABLE },
-          });
-        }
-
-        if (order.paymentStatus === PaymentStatus.SUCCESS) {
-          await tx.payment.updateMany({
-            where: { orderId: id },
-            data: { status: PaymentStatus.REFUNDED },
-          });
-          await tx.order.update({
-            where: { id },
-            data: { paymentStatus: PaymentStatus.REFUNDED },
-          });
-        } else {
-          await tx.payment.updateMany({
-            where: { orderId: id },
-            data: { status: PaymentStatus.FAILED },
-          });
-          await tx.order.update({
-            where: { id },
-            data: { paymentStatus: PaymentStatus.FAILED },
-          });
+          await releaseTableIfNoOpenOrders(tx, order.tableId);
         }
       }
+
+      const receipt =
+        status === OrderStatus.SERVED
+          ? await completeServedDineInOrder(tx, id)
+          : null;
 
       await tx.auditLog.create({
         data: {
@@ -737,16 +848,24 @@ export async function updateOrderStatus(id: string, status: OrderStatus) {
         },
       });
 
-      return { order, inventoryWarnings };
+      const finalOrder = receipt
+        ? await tx.order.findUnique({
+            where: { id },
+            include: { table: true },
+          })
+        : order;
+      return { order: finalOrder, receipt };
     });
 
+    await sendCompletedOrderReceipt(result.receipt);
     revalidatePath("/inventory");
     revalidatePath("/manager");
     revalidatePath("/dashboard/orders");
+    revalidatePath("/service");
+    revalidatePath("/cashier");
     return {
       success: true,
       order: result.order,
-      inventoryWarnings: [...new Set(result.inventoryWarnings)],
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Update failed.";
@@ -767,7 +886,7 @@ export async function updateOrderPaymentStatus(
   }
 
   try {
-    await prisma.$transaction(async (tx) => {
+    const receipt = await prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({
         where: { id },
         select: { paymentMethod: true, paymentStatus: true },
@@ -776,7 +895,9 @@ export async function updateOrderPaymentStatus(
       if (order.paymentMethod === PaymentMethod.RAZORPAY) {
         throw new Error("Online Razorpay payments must be provider-verified.");
       }
-      if (order.paymentStatus === PaymentStatus.SUCCESS) return;
+      if (order.paymentStatus === PaymentStatus.SUCCESS) {
+        return completeServedDineInOrder(tx, id);
+      }
       if (order.paymentStatus !== PaymentStatus.PENDING) {
         throw new Error("This payment cannot be confirmed from its current status.");
       }
@@ -802,7 +923,13 @@ export async function updateOrderPaymentStatus(
         throw new Error("No matching pending payment record was found.");
       }
 
-      await tx.order.update({ where: { id }, data: { paymentStatus } });
+      const updated = await tx.order.updateMany({
+        where: { id, paymentStatus: PaymentStatus.PENDING },
+        data: { paymentStatus },
+      });
+      if (updated.count !== 1) {
+        throw new Error("The payment status changed before confirmation. Refresh and retry.");
+      }
       await tx.payment.updateMany({
         where: {
           orderId: id,
@@ -831,9 +958,13 @@ export async function updateOrderPaymentStatus(
           details: { method: order.paymentMethod },
         },
       });
+      return completeServedDineInOrder(tx, id);
     });
 
+    await sendCompletedOrderReceipt(receipt);
     revalidatePath("/dashboard/orders");
+    revalidatePath("/service");
+    revalidatePath("/cashier");
     return { success: true };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Update failed.";

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel } from "@/lib/format";
+import { getNextOrderStatuses } from "@/lib/order-transitions";
 import { OrderStatus, PaymentStatus } from "@prisma/client";
 import { toast } from "sonner";
 import { Search, RefreshCw, FileText } from "lucide-react";
@@ -40,9 +41,6 @@ export default function OrdersPage() {
     if (result.error) toast.error(result.error);
     else {
       toast.success(`Order marked as ${getOrderStatusLabel(status)}`);
-      if (result.inventoryWarnings?.length) {
-        toast.warning(`No saved recipe for: ${result.inventoryWarnings.join(", ")}. No ingredients were deducted for those items.`);
-      }
       queryClient.invalidateQueries({ queryKey: ["orders"] });
     }
   };
@@ -55,15 +53,6 @@ export default function OrdersPage() {
       queryClient.invalidateQueries({ queryKey: ["orders"] });
     }
   };
-
-  const statusFlow: OrderStatus[] = [
-    OrderStatus.PLACED,
-    OrderStatus.PREPARING,
-    OrderStatus.PREPARED,
-    OrderStatus.READY,
-    OrderStatus.SERVED,
-    OrderStatus.COMPLETED,
-  ];
 
   return (
     <div>
@@ -98,7 +87,17 @@ export default function OrdersPage() {
           <p className="text-center text-muted-foreground py-12">No orders found</p>
         ) : (
           <div className="grid gap-4">
-            {filtered.map((order) => (
+            {filtered.map((order) => {
+              const statusOptions = [
+                order.status,
+                ...getNextOrderStatuses(order.status, order.orderType),
+                ...(order.paymentStatus !== PaymentStatus.SUCCESS &&
+                order.status !== OrderStatus.COMPLETED &&
+                order.status !== OrderStatus.CANCELLED
+                  ? [OrderStatus.CANCELLED]
+                  : []),
+              ];
+              return (
               <Card key={order.id} className="border-border/60">
                 <CardContent className="p-5">
                   <div className="flex flex-wrap items-start justify-between gap-4">
@@ -134,10 +133,9 @@ export default function OrdersPage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {statusFlow.map((s) => (
+                          {statusOptions.map((s) => (
                             <SelectItem key={s} value={s}>{getOrderStatusLabel(s)}</SelectItem>
                           ))}
-                          <SelectItem value={OrderStatus.CANCELLED}>Cancelled</SelectItem>
                         </SelectContent>
                       </Select>
                       <div className="flex gap-2">
@@ -162,7 +160,8 @@ export default function OrdersPage() {
                   </div>
                 </CardContent>
               </Card>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

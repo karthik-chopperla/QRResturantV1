@@ -35,6 +35,7 @@ export default function InventoryPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["inventory-data"],
     queryFn: getInventoryData,
+    refetchInterval: 15000,
   });
   const [userRole, setUserRole] = useState<Role | null>(null);
   const [newCategory, setNewCategory] = useState("");
@@ -90,6 +91,10 @@ export default function InventoryPage() {
   );
   const purchaseRequests =
     data && "purchaseRequests" in data ? data.purchaseRequests ?? [] : [];
+  const lowStockNotifications =
+    data && "lowStockNotifications" in data
+      ? data.lowStockNotifications ?? []
+      : [];
   const historyMovements = Array.isArray(historyData) ? historyData : [];
   const activeIngredients = ingredients.filter((ingredient) => ingredient.isActive);
   const lowStock = ingredients.filter(
@@ -388,6 +393,32 @@ export default function InventoryPage() {
           <Stat label="Low stock" value={lowStock} />
           <Stat label="Estimated stock value" value={formatCurrency(totalStockValue)} />
         </section>
+
+        {lowStockNotifications.length > 0 && (
+          <Card>
+            <CardContent className="space-y-2 p-4">
+              <h2 className="font-semibold">Low-stock notifications</h2>
+              {lowStockNotifications.slice(0, 10).map((notification) => {
+                const resolved = notification.message.startsWith("Resolved:");
+                const message = notification.message
+                  .replace(/^Resolved:\s*/, "")
+                  .replace(/^\[ingredient:[^\]]+\]\s*/, "")
+                  .replace(/\s+\[ingredient:[^\]]+\]$/, "");
+                return (
+                  <div key={notification.id} className="flex flex-wrap items-start justify-between gap-2 rounded-md border p-3 text-sm">
+                    <div>
+                      <p className="font-medium">{notification.title}</p>
+                      <p className="text-muted-foreground">{message}</p>
+                    </div>
+                    <Badge variant={resolved ? "secondary" : "destructive"}>
+                      {resolved ? "Resolved" : notification.isRead ? "Acknowledged — still low" : "Active"}
+                    </Badge>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        )}
 
         {userRole === Role.RESTAURANT_OWNER && (
           <Card>

@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatCurrency, formatDate, getOrderStatusLabel } from "@/lib/format";
+import { getNextOrderStatuses } from "@/lib/order-transitions";
 import { toast } from "sonner";
 import { useState } from "react";
 
@@ -74,9 +75,6 @@ export default function ManagerPage() {
         return;
       }
       toast.success(`Order updated to ${getOrderStatusLabel(status)}`);
-      if (result.inventoryWarnings?.length) {
-        toast.warning(`No saved recipe for: ${result.inventoryWarnings.join(", ")}. No ingredients were deducted for those items.`);
-      }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["manager-orders"] }),
         queryClient.invalidateQueries({ queryKey: ["manager-overview"] }),
@@ -206,7 +204,17 @@ export default function ManagerPage() {
             <p className="py-8 text-center text-sm text-muted-foreground">No orders yet.</p>
           ) : (
             <div className="space-y-3">
-              {orders.map((order) => (
+              {orders.map((order) => {
+                const statusOptions = [
+                  order.status,
+                  ...getNextOrderStatuses(order.status, order.orderType),
+                  ...(order.paymentStatus !== "SUCCESS" &&
+                  order.status !== OrderStatus.COMPLETED &&
+                  order.status !== OrderStatus.CANCELLED
+                    ? [OrderStatus.CANCELLED]
+                    : []),
+                ];
+                return (
                 <Card key={order.id}>
                   <CardContent className="flex flex-wrap items-center justify-between gap-4 p-4">
                     <div className="min-w-0 space-y-1">
@@ -236,9 +244,7 @@ export default function ManagerPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {Object.values(OrderStatus)
-                          .filter((status) => status !== OrderStatus.COLLECTED)
-                          .map((status) => (
+                        {statusOptions.map((status) => (
                             <SelectItem key={status} value={status}>
                               {getOrderStatusLabel(status)}
                             </SelectItem>
@@ -247,7 +253,8 @@ export default function ManagerPage() {
                     </Select>
                   </CardContent>
                 </Card>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>

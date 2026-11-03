@@ -3,6 +3,10 @@ import crypto from "crypto";
 import prisma from "@/lib/prisma";
 import { PaymentStatus, OrderStatus, TableStatus, NotificationType } from "@prisma/client";
 import { toNumber } from "@/lib/decimal";
+import {
+  completeServedDineInOrder,
+  sendCompletedOrderReceipt,
+} from "@/lib/order-lifecycle";
 
 export const dynamic = "force-dynamic";
 
@@ -57,8 +61,11 @@ export async function POST(request: Request) {
     const event: string = payload.event;
     console.log("[webhook] Received event:", event);
 
-    // Handle payment success events
-    if (event === "payment.captured" || event === "payment.authorized") {
+    if (event === "payment.authorized") {
+      console.log("[webhook] Payment is authorized; waiting for capture.");
+    }
+    // Handle captured payments only; authorization is not a completed payment.
+    else if (event === "payment.captured") {
       const paymentEntity = payload.payload?.payment?.entity;
       if (!paymentEntity) {
         console.log("[webhook] No payment entity in payload, ignoring");
@@ -69,6 +76,11 @@ export async function POST(request: Request) {
       const razorpayPaymentId: string = paymentEntity.id;
       const paymentStatus: string = paymentEntity.status;
 
+      if (paymentStatus !== "captured") {
+        console.warn("[webhook] Captured event did not contain a captured payment.");
+        return NextResponse.json({ status: "ignored" }, { headers: NO_CACHE_HEADERS });
+      }
+
       console.log("[webhook] Payment event:", {
         razorpayOrderId,
         razorpayPaymentId,
@@ -76,7 +88,7 @@ export async function POST(request: Request) {
         event,
       });
 
-      await prisma.$transaction(async (tx) => {
+      const receipt = await prisma.$transaction(async (tx) => {
         const payment = await tx.payment.findFirst({
           where: { transactionId: razorpayOrderId },
           include: { order: { select: { id: true, status: true, orderType: true, orderNumber: true, customerName: true, totalAmount: true, tableId: true, table: { select: { number: true } } } } },
@@ -84,13 +96,13 @@ export async function POST(request: Request) {
 
         if (!payment) {
           console.warn("[webhook] Payment record not found for orderId:", razorpayOrderId);
-          return;
+          return null;
         }
 
         // Idempotent: if already SUCCESS, skip
         if (payment.status === PaymentStatus.SUCCESS) {
           console.log("[webhook] Payment already SUCCESS (idempotent), skipping");
-          return;
+          return completeServedDineInOrder(tx, payment.orderId);
         }
 
         // Update payment record
@@ -145,7 +157,9 @@ export async function POST(request: Request) {
           });
           console.log("[webhook] Order already in status", payment.order.status, "— updated payment status only");
         }
+        return completeServedDineInOrder(tx, payment.orderId);
       });
+      await sendCompletedOrderReceipt(receipt);
     }
     // Handle payment failure events
     else if (event === "payment.failed") {
@@ -185,12 +199,13 @@ export async function POST(request: Request) {
       const razorpayOrderId: string = orderEntity.id;
       console.log("[webhook] order.paid for orderId:", razorpayOrderId);
 
-      await prisma.$transaction(async (tx) => {
+      const receipt = await prisma.$transaction(async (tx) => {
         const payment = await tx.payment.findFirst({
           where: { transactionId: razorpayOrderId },
         });
 
-        if (payment && payment.status !== PaymentStatus.SUCCESS) {
+        if (!payment) return null;
+        if (payment.status !== PaymentStatus.SUCCESS) {
           await tx.payment.update({
             where: { id: payment.id },
             data: { status: PaymentStatus.SUCCESS },
@@ -239,7 +254,9 @@ export async function POST(request: Request) {
             }
           }
         }
+        return completeServedDineInOrder(tx, payment.orderId);
       });
+      await sendCompletedOrderReceipt(receipt);
     } else {
       console.log("[webhook] Unhandled event:", event);
     }

@@ -4,6 +4,11 @@ import prisma from "@/lib/prisma";
 import { PaymentStatus, OrderStatus, TableStatus, NotificationType } from "@prisma/client";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import { toNumber } from "@/lib/decimal";
+import { getRazorpayClient } from "@/lib/razorpay";
+import {
+  completeServedDineInOrder,
+  sendCompletedOrderReceipt,
+} from "@/lib/order-lifecycle";
 
 export const dynamic = "force-dynamic";
 
@@ -78,10 +83,22 @@ export async function POST(request: Request) {
       );
     }
 
+    const verifiedPayment =
+      await getRazorpayClient().payments.fetch(razorpay_payment_id);
+    if (
+      verifiedPayment.order_id !== razorpay_order_id ||
+      verifiedPayment.status !== "captured"
+    ) {
+      return NextResponse.json(
+        { error: "Payment has not been captured yet." },
+        { status: 409, headers: NO_CACHE_HEADERS }
+      );
+    }
+
     console.log("[verify] Signature verified successfully");
 
     // Transactionally update Payment, Order, table, and notification
-    await prisma.$transaction(async (tx) => {
+    const receipt = await prisma.$transaction(async (tx) => {
       const payment = await tx.payment.findFirst({
         where: { transactionId: razorpay_order_id },
       });
@@ -94,7 +111,7 @@ export async function POST(request: Request) {
       // Idempotent: if already SUCCESS, skip all updates
       if (payment.status === PaymentStatus.SUCCESS) {
         console.log("[verify] Payment already verified (idempotent), skipping");
-        return;
+        return completeServedDineInOrder(tx, payment.orderId);
       }
 
       console.log("[verify] Updating payment record:", {
@@ -173,7 +190,9 @@ export async function POST(request: Request) {
         });
         console.log("[verify] Order already in status", order.status, "— updated payment status only");
       }
+      return completeServedDineInOrder(tx, payment.orderId);
     });
+    await sendCompletedOrderReceipt(receipt);
 
     const elapsed = Date.now() - startTime;
     console.log(`[verify] Payment verification completed in ${elapsed}ms`);

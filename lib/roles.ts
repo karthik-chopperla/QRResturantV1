@@ -70,10 +70,7 @@ export async function requireOrdersViewer() {
   if (!user) return null;
   if (
     user.role !== Role.RESTAURANT_OWNER &&
-    user.role !== Role.MANAGER &&
-    user.role !== Role.CASHIER &&
-    user.role !== Role.SERVICE_STAFF &&
-    user.role !== Role.CHEF_KITCHEN_STAFF
+    user.role !== Role.MANAGER
   ) {
     return null;
   }
@@ -83,7 +80,17 @@ export async function requireOrdersViewer() {
 export async function requireOrderStatusAccess(status: string) {
   const user = await getCurrentUser();
   if (!user) return null;
-  if (user.role === Role.RESTAURANT_OWNER || user.role === Role.MANAGER) {
+  if (
+    (user.role === Role.RESTAURANT_OWNER || user.role === Role.MANAGER) &&
+    [
+      "PREPARING",
+      "PREPARED",
+      "READY",
+      "SERVED",
+      "COLLECTED",
+      "CANCELLED",
+    ].includes(status)
+  ) {
     return user;
   }
   if (
