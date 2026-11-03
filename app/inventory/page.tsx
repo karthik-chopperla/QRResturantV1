@@ -170,19 +170,42 @@ export default function InventoryPage() {
         )}
 
         <Card>
-          <CardContent className="p-4">
-            <h2 className="mb-4 text-lg font-semibold">Add Ingredient</h2>
-            <form className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6" onSubmit={handleSaveIngredient}>
-              <Input aria-label="Ingredient name" placeholder="Ingredient name" value={ingredientForm.name} onChange={(event) => setIngredientForm({ ...ingredientForm, name: event.target.value })} required />
-              <Input aria-label="Unit" placeholder="Unit (kg, ml, pcs)" value={ingredientForm.unit} onChange={(event) => setIngredientForm({ ...ingredientForm, unit: event.target.value })} required />
-              <Input aria-label="Opening quantity" type="number" min="0" step="0.001" placeholder="Opening stock" value={ingredientForm.quantityOnHand} onChange={(event) => setIngredientForm({ ...ingredientForm, quantityOnHand: event.target.value })} required />
-              <Input aria-label="Minimum quantity" type="number" min="0" step="0.001" placeholder="Minimum stock" value={ingredientForm.minimumQuantity} onChange={(event) => setIngredientForm({ ...ingredientForm, minimumQuantity: event.target.value })} required />
-              <Input aria-label="Unit cost" type="number" min="0" step="0.01" placeholder="Unit cost" value={ingredientForm.unitCost} onChange={(event) => setIngredientForm({ ...ingredientForm, unitCost: event.target.value })} required />
-              <select aria-label="Ingredient category" className="h-10 rounded-md border bg-background px-3 text-sm" value={ingredientForm.categoryId} onChange={(event) => setIngredientForm({ ...ingredientForm, categoryId: event.target.value })}>
-                <option value="">No category</option>
-                {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-              </select>
-              <Button className="sm:col-span-2 lg:col-span-6" type="submit">Save ingredient</Button>
+          <CardContent className="space-y-4 p-4">
+            <div>
+              <h2 className="text-lg font-semibold">Add Ingredient</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Add an ingredient and its current stock. You can optionally group it with a category.
+              </p>
+            </div>
+            <form className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" onSubmit={handleSaveIngredient}>
+              <div className="space-y-1.5">
+                <Label htmlFor="ingredient-name">Ingredient name</Label>
+                <Input id="ingredient-name" placeholder="e.g. Paneer" value={ingredientForm.name} onChange={(event) => setIngredientForm({ ...ingredientForm, name: event.target.value })} required />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ingredient-unit">Unit</Label>
+                <Input id="ingredient-unit" placeholder="e.g. kg, L, pcs" value={ingredientForm.unit} onChange={(event) => setIngredientForm({ ...ingredientForm, unit: event.target.value })} required />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ingredient-opening-stock">Opening stock</Label>
+                <Input id="ingredient-opening-stock" type="number" min="0" step="0.001" placeholder="Quantity currently in stock" value={ingredientForm.quantityOnHand} onChange={(event) => setIngredientForm({ ...ingredientForm, quantityOnHand: event.target.value })} required />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ingredient-minimum-stock">Low-stock alert level</Label>
+                <Input id="ingredient-minimum-stock" type="number" min="0" step="0.001" placeholder="Alert when stock reaches this amount" value={ingredientForm.minimumQuantity} onChange={(event) => setIngredientForm({ ...ingredientForm, minimumQuantity: event.target.value })} required />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ingredient-unit-cost">Cost per unit</Label>
+                <Input id="ingredient-unit-cost" type="number" min="0" step="0.01" placeholder="Cost for one unit" value={ingredientForm.unitCost} onChange={(event) => setIngredientForm({ ...ingredientForm, unitCost: event.target.value })} required />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ingredient-category-select">Category (optional)</Label>
+                <select id="ingredient-category-select" className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={ingredientForm.categoryId} onChange={(event) => setIngredientForm({ ...ingredientForm, categoryId: event.target.value })}>
+                  <option value="">No category</option>
+                  {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+                </select>
+              </div>
+              <Button className="sm:col-span-2 lg:col-span-3" type="submit">Save ingredient to inventory</Button>
             </form>
           </CardContent>
         </Card>
