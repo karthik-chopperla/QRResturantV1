@@ -124,7 +124,7 @@ export default function DecisionSection() {
             className="w-full sm:w-auto bg-[#0f9f90] hover:bg-[#0d8a7c] text-white py-3.5 px-7 rounded-2xl text-xs font-semibold uppercase tracking-wider flex items-center justify-center gap-2 shadow-[0_4px_12px_rgba(15,159,144,0.15)] hover:shadow-[0_8px_20px_rgba(15,159,144,0.25)] transition-all duration-250 cursor-pointer"
           >
             <Calendar className="size-4" />
-            Get QRFast for Your Restaurant
+            Get DineDesk for Your Restaurant
           </motion.button>
 
           {/* Secondary CTA */}

@@ -14,8 +14,6 @@ import { getDefaultRouteForRole } from "@/lib/roles";
 import { toast } from "sonner";
 import { Loader2, Mail, Lock, Eye, EyeOff } from "lucide-react";
 import { motion } from "framer-motion";
-import Image from "next/image";
-import faviconImage from "@/assets/images/QRFavicon.png";
 
 const cardVariants = {
   hidden: { opacity: 0, y: 12 },
@@ -96,13 +94,7 @@ export default function LoginPage() {
           {/* 1. Logo */}
           <motion.div variants={itemVariants} className="mb-2.5">
             <Link href="/" className="flex items-center hover:opacity-90 transition-opacity">
-              <Image
-                src={faviconImage}
-                alt="QRFast Logo"
-                width={36}
-                height={36}
-                className="size-9 object-contain"
-              />
+              <span className="text-xl font-bold tracking-tight text-slate-900">DineDesk</span>
             </Link>
           </motion.div>
 

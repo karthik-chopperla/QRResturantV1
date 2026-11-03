@@ -87,7 +87,7 @@ export default function AccountantPage() {
     }
     const link = document.createElement("a");
     link.href = URL.createObjectURL(new Blob([result.csv], { type: "text/csv" }));
-    link.download = `qrfast-financial-report-${from}-to-${to}.csv`;
+    link.download = `dinedesk-financial-report-${from}-to-${to}.csv`;
     link.click();
     URL.revokeObjectURL(link.href);
   };

@@ -1,4 +1,4 @@
-# QRFast — QR-Based Restaurant Dine-In Ordering System
+# DineDesk — QR-Based Restaurant Dine-In Ordering System
 
 A production-ready QR dine-in ordering platform built with Next.js 15, Supabase, Prisma, and Razorpay. Customers scan a table QR code to browse the menu, customize orders, pay online or at the counter, and track orders in real time. Restaurant staff manage everything from admin, kitchen, and cashier dashboards.
 
@@ -107,7 +107,7 @@ npx prisma db seed
 
 1. Create a Supabase project (free tier)
 2. Enable Email auth in Authentication → Sign In / Providers → Email.
-3. To disable confirmation for any Supabase-managed email signup, turn off **Confirm email** in the Email provider settings. Accounts created by QRFast's initial-admin and staff flows are created as confirmed users.
+3. To disable confirmation for any Supabase-managed email signup, turn off **Confirm email** in the Email provider settings. Accounts created by DineDesk's initial-admin and staff flows are created as confirmed users.
 4. In Supabase, open **Project Settings → API Keys** and copy the server-only `service_role` key (legacy) or create a Supabase secret key. Add it as `SUPABASE_SERVICE_ROLE_KEY` in `.env.local` and Vercel. Never use the publishable/anon key here, add a `NEXT_PUBLIC_` prefix, or commit this value.
 5. Create the initial Restaurant Owner through `/signup`. After signing in, use Dashboard → Staff to create accounts for any of the eight roles. Staff sign in at `/login`.
 

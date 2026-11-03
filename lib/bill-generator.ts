@@ -53,7 +53,7 @@ export async function generateBillHtml(orderId: string): Promise<string | null> 
   });
 
   const restaurant = settings ?? {
-    restaurantName: "QRFast Restaurant",
+    restaurantName: "DineDesk Restaurant",
     logo: null,
     address: null,
     phone: null,

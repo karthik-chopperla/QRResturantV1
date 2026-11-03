@@ -33,7 +33,7 @@ export default async function StaffHomePage() {
   return (
     <main className="flex min-h-dvh items-center justify-center bg-background p-6">
       <section className="w-full max-w-lg space-y-4 rounded-xl border bg-card p-6 shadow-sm">
-        <p className="text-sm font-medium text-muted-foreground">QRFast staff portal</p>
+        <p className="text-sm font-medium text-muted-foreground">DineDesk staff portal</p>
         <h1 className="text-2xl font-semibold">
           Welcome, {user.name || user.email}
         </h1>

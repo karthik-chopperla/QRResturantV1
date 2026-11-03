@@ -57,7 +57,7 @@ export function DashboardShell({ children, user, unreadCount = 0 }: Props) {
           >
             <Menu className="size-5" />
           </Button>
-          <span className="text-sm font-semibold">QRFast</span>
+          <span className="text-sm font-semibold">DineDesk</span>
           <ThemeToggle />
         </div>
 

@@ -144,7 +144,7 @@ export async function sendCompletedOrderReceipt(
     await resend.emails.send({
       from: process.env.RESEND_FROM_EMAIL || "receipts@resend.dev",
       to: customerEmail,
-      subject: `Invoice ${invoiceNumber} | QRFast`,
+      subject: `Invoice ${invoiceNumber} | DineDesk`,
       html: `<p>Dear Customer,</p><p>Thank you for dining with us! Here is your bill summary:</p><ul><li>Invoice: ${invoiceNumber}</li><li>Subtotal: ₹${toNumber(order.subtotal)}</li><li>Discount: ₹${toNumber(order.discountAmount)}</li><li>GST: ₹${toNumber(order.gstAmount)}</li><li>Service Charge: ₹${toNumber(order.serviceChargeAmount)}</li><li><strong>Grand Total: ₹${toNumber(order.totalAmount)}</strong></li></ul><p>We hope to see you again soon!</p>`,
     });
   } catch (error) {

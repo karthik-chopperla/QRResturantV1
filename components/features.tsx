@@ -78,7 +78,7 @@ export default function Features() {
 
         <p className="mx-auto mt-4 max-w-xl text-sm leading-relaxed font-normal text-slate-400 sm:text-base">
           From the moment a customer scans the QR code until the food reaches
-          the table, QRFast keeps everything connected.
+          the table, DineDesk keeps everything connected.
         </p>
       </div>
 
@@ -210,7 +210,7 @@ export default function Features() {
                 </div>
 
                 <div className="space-y-1 text-[11px] text-slate-400">
-                  <div>$ qrfast-scanner --init</div>
+                  <div>$ dinedesk-scanner --init</div>
                   <div className="text-slate-500">Scanning Table 7...</div>
                   <div className="font-semibold text-[#10b981] flex items-center min-h-[16px]">
                     {step >= 1 && (

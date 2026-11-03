@@ -3,8 +3,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence, Variants } from "framer-motion";
 import Link from "next/link";
-import Image from "next/image";
-import logoImage from "@/assets/images/QRFast_Logo-removebg-preview.png";
 import {
   Calendar,
   Check,
@@ -127,7 +125,7 @@ export default function PricingPage() {
 
   const pricingTiers = [
     {
-      name: "QRFast for Restaurants",
+      name: "DineDesk for Restaurants",
       setupPrice: "₹11,999",
       monthlyPrice: "₹499",
       description: "Everything your restaurant needs to go digital — one simple plan, no surprises.",
@@ -237,12 +235,7 @@ export default function PricingPage() {
       <header className="sticky top-0 z-50 border-b border-slate-200/50 bg-[#F8FAFC] w-full select-none">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4">
           <Link href="/" className="flex items-center hover:opacity-90 transition-opacity">
-            <Image
-              src={logoImage}
-              alt="QRFast Logo"
-              height={36}
-              className="h-9 w-auto object-contain"
-            />
+            <span className="text-xl font-bold tracking-tight text-slate-900">DineDesk</span>
           </Link>
           <nav className="hidden sm:flex items-center gap-8">
             <Link href="/#features" className="text-sm font-semibold text-slate-500 hover:text-slate-900 transition-colors">
@@ -290,7 +283,7 @@ export default function PricingPage() {
             variants={itemVariants}
             className="mx-auto max-w-2xl text-sm leading-relaxed font-normal text-slate-500 sm:text-base"
           >
-            Choose the perfect QRFast solution for your restaurant. Every plan includes secure hosting, ongoing updates and dedicated support.
+            Choose the perfect DineDesk solution for your restaurant. Every plan includes secure hosting, ongoing updates and dedicated support.
           </motion.p>
 
           {/* Staggered Trust Badges */}
@@ -415,7 +408,7 @@ export default function PricingPage() {
               INCLUDED BENEFITS
             </span>
             <h2 className="text-3xl font-bold text-slate-900 tracking-tight">
-              Every QRFast Plan Includes
+              Every DineDesk Plan Includes
             </h2>
           </div>
 
@@ -553,7 +546,7 @@ export default function PricingPage() {
             variants={itemVariants}
             className="text-4xl font-bold leading-tight tracking-tight text-slate-900 sm:text-5xl max-w-2xl"
           >
-            Ready to Bring QRFast to Your Restaurant?
+            Ready to Bring DineDesk to Your Restaurant?
           </motion.h2>
 
           <motion.p
@@ -574,7 +567,7 @@ export default function PricingPage() {
               className="w-full sm:w-auto bg-[#0f9f90] hover:bg-[#0d8a7c] text-white py-3.5 px-7 rounded-2xl text-xs font-semibold uppercase tracking-wider flex items-center justify-center gap-2 shadow-[0_4px_12px_rgba(15,159,144,0.15)] transition-all duration-250 cursor-pointer"
             >
               <Calendar className="size-4" />
-              Get QRFast for Your Restaurant
+              Get DineDesk for Your Restaurant
             </motion.button>
 
             <Link href="https://wa.me/yourwhatsappnumber" target="_blank" className="w-full sm:w-auto">
@@ -606,7 +599,7 @@ export default function PricingPage() {
       {/* Subtle Mini Footer */}
       <footer className="border-t border-slate-200/50 py-8 text-center text-xs text-slate-400 bg-white w-full select-none">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p>© {new Date().getFullYear()} QRFast. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} DineDesk. All rights reserved.</p>
           <div className="flex gap-6">
             <Link href="/" className="hover:text-slate-900 transition-colors">Home</Link>
             <Link href="/pricing" className="hover:text-slate-900 transition-colors">Pricing</Link>

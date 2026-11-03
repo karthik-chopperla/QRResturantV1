@@ -180,7 +180,7 @@ export default function DashboardShowcase() {
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5 font-bold text-slate-900 text-lg">
               <Sparkles className="size-5 text-[#0f9f90]" />
-              QRFast
+              DineDesk
             </div>
             <span className="h-4 w-[1px] bg-slate-200" />
             <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">

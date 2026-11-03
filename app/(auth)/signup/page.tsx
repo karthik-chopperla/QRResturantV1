@@ -12,8 +12,6 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Loader2, User, Mail, Lock, Eye, EyeOff } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import Image from "next/image";
-import faviconImage from "@/assets/images/QRFavicon.png";
 
 const cardVariants = {
   hidden: { opacity: 0, y: 12 },
@@ -115,13 +113,7 @@ export default function SignupPage() {
         {/* Static Logo wrapper at top of card */}
         <div className="flex flex-col items-center mb-6">
           <Link href="/" className="flex items-center hover:opacity-90 transition-opacity">
-            <Image
-              src={faviconImage}
-              alt="QRFast Logo"
-              width={36}
-              height={36}
-              className="size-9 object-contain"
-            />
+            <span className="text-xl font-bold tracking-tight text-slate-900">DineDesk</span>
           </Link>
         </div>
 

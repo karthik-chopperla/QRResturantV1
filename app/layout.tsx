@@ -18,14 +18,14 @@ const geistMono = localFont({
 
 export const metadata: Metadata = {
   title: {
-    default: "QRFast | Smart QR Dine-In Menu & Ordering System",
-    template: "%s | QRFast",
+    default: "DineDesk | Smart Restaurant Ordering System",
+    template: "%s | DineDesk",
   },
   description: "Browse the menu, customize your order, and pay instantly from your table. A seamless and contactless restaurant dine-in experience.",
   keywords: ["QR menu", "restaurant ordering", "dine-in", "contactless menu", "QR code restaurant"],
-  authors: [{ name: "QRFast" }],
+  authors: [{ name: "DineDesk" }],
   openGraph: {
-    title: "QRFast | Smart QR Dine-In Ordering System",
+    title: "DineDesk | Smart QR Dine-In Ordering System",
     description: "Contactless tableside ordering, digital checkout, and admin insights for modern restaurants.",
     type: "website",
   },
