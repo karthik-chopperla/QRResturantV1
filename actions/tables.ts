@@ -8,6 +8,30 @@ import { createTableSchema } from "@/schemas";
 import QRCode from "qrcode";
 import { generateTableToken } from "@/lib/table-token";
 import { TableStatus } from "@prisma/client";
+import { getPublicAppUrl } from "@/lib/app-url";
+
+async function generateTableQrCode(tableId: string): Promise<string> {
+  const appUrl = getPublicAppUrl();
+  if (!appUrl) {
+    throw new Error(
+      "App URL is not configured. Set NEXT_PUBLIC_APP_URL or configure the Vercel production domain."
+    );
+  }
+
+  if (!process.env.TABLE_TOKEN_SECRET || process.env.TABLE_TOKEN_SECRET.length < 16) {
+    throw new Error(
+      "TABLE_TOKEN_SECRET is not configured on the server. Please add it to your environment variables."
+    );
+  }
+
+  const token = generateTableToken(tableId);
+  return QRCode.toDataURL(`${appUrl}/menu/${token}`, {
+    errorCorrectionLevel: "H",
+    margin: 2,
+    width: 400,
+    color: { dark: "#000000", light: "#FFFFFF" },
+  });
+}
 
 export async function getTables() {
   const user = await requireAdmin();
@@ -31,29 +55,9 @@ export async function createTable(data: { number: string }) {
     return { error: parsed.error.issues.map((e) => e.message).join(", ") };
   }
 
-  const appUrl =
-    process.env.NEXT_PUBLIC_APP_URL ||
-    (process.env.NODE_ENV === "production" ? undefined : "http://localhost:3000");
-
-  if (!appUrl) {
-    return { error: "NEXT_PUBLIC_APP_URL is not configured." };
-  }
-
-  if (!process.env.TABLE_TOKEN_SECRET || process.env.TABLE_TOKEN_SECRET.length < 16) {
-    return { error: "TABLE_TOKEN_SECRET is not configured on the server. Please add it to your environment variables." };
-  }
-
   try {
     const tableId = randomUUID();
-    const token = generateTableToken(tableId);
-    const qrTargetUrl = `${appUrl}/menu/${token}`;
-
-    const qrCodeDataUrl = await QRCode.toDataURL(qrTargetUrl, {
-      errorCorrectionLevel: "H",
-      margin: 2,
-      width: 400,
-      color: { dark: "#000000", light: "#FFFFFF" },
-    });
+    const qrCodeDataUrl = await generateTableQrCode(tableId);
 
     const table = await prisma.table.create({
       data: {
@@ -72,6 +76,27 @@ export async function createTable(data: { number: string }) {
       return { error: "A table with this number already exists." };
     }
     return { error: `Failed to create table: ${msg}` };
+  }
+}
+
+export async function regenerateTableQrCode(tableId: string) {
+  const user = await requireAdmin();
+  if (!user) return { error: "Unauthorized" };
+
+  try {
+    const qrCodeUrl = await generateTableQrCode(tableId);
+    const table = await prisma.table.update({
+      where: { id: tableId },
+      data: { qrCodeUrl },
+      select: { id: true, number: true, qrCodeUrl: true },
+    });
+
+    revalidatePath("/dashboard/tables");
+    return { success: true, table };
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : "QR code regeneration failed.";
+    console.error("Table QR regeneration failure:", msg);
+    return { error: msg };
   }
 }
 

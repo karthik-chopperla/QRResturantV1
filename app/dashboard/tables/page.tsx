@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getTables, createTable, deleteTable, updateTableStatus } from "@/actions/tables";
+import { getTables, createTable, deleteTable, updateTableStatus, regenerateTableQrCode } from "@/actions/tables";
 import { StaffHeader } from "@/components/layout/dashboard-sidebar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,6 +46,16 @@ export default function TablesPage() {
 
   const handleStatusChange = async (id: string, status: TableStatus) => {
     await updateTableStatus(id, status);
+    queryClient.invalidateQueries({ queryKey: ["tables"] });
+  };
+
+  const handleRegenerateQR = async (id: string) => {
+    const result = await regenerateTableQrCode(id);
+    if ("error" in result) {
+      toast.error(result.error);
+      return;
+    }
+    toast.success("QR code updated. Download and replace any previously printed code.");
     queryClient.invalidateQueries({ queryKey: ["tables"] });
   };
 
@@ -110,6 +120,9 @@ export default function TablesPage() {
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" className="flex-1" onClick={() => downloadQR(table.qrCodeUrl, table.number)}>
                     <Download className="mr-1 size-3" />QR
+                  </Button>
+                  <Button variant="outline" size="sm" className="flex-1" onClick={() => handleRegenerateQR(table.id)}>
+                    <QrCode className="mr-1 size-3" />Regenerate
                   </Button>
                   <Button variant="ghost" size="icon" onClick={() => handleDelete(table.id)}>
                     <Trash2 className="size-4 text-destructive" />
