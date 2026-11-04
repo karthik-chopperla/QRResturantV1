@@ -4,11 +4,11 @@ import logoImage from "@/assets/images/dinedesk-logo.png";
 
 export default function Hero() {
   return (
-    <main className="flex min-h-screen flex-col bg-slate-950">
+    <main className="flex min-h-screen flex-col bg-white">
       <header className="mx-auto flex h-24 w-full max-w-7xl items-center justify-end px-4 sm:px-6">
         <Link
           href="/login"
-          className="rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-slate-950 transition-colors hover:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+          className="rounded-full bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-950"
         >
           Sign In
         </Link>
