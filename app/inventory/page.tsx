@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Role } from "@prisma/client";
 import {
@@ -56,6 +56,7 @@ export default function InventoryPage() {
   const [recipeLines, setRecipeLines] = useState([
     { ingredientId: "", quantity: "" },
   ]);
+  const loadedRecipeSelection = useRef<string | null>(null);
   const [ingredientSearch, setIngredientSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [stockFilter, setStockFilter] = useState<"ALL" | "LOW" | "IN_STOCK" | "INACTIVE">("ALL");
@@ -145,14 +146,18 @@ export default function InventoryPage() {
       .map((batch) => ({ ingredient, batch }))
   );
 
+  const recipeSelectionKey = `${recipeMenuId}:${recipeScopeType}:${recipeScopeId}`;
   useEffect(() => {
-    setRecipeScopeId("");
-    setRecipeLines([{ ingredientId: "", quantity: "" }]);
-  }, [recipeMenuId, recipeScopeType]);
+    if (loadedRecipeSelection.current === recipeSelectionKey) return;
+    if (!recipeMenuId || (recipeScopeType !== "BASE" && !recipeScopeId)) {
+      loadedRecipeSelection.current = recipeSelectionKey;
+      setRecipeLines([{ ingredientId: "", quantity: "" }]);
+      return;
+    }
 
-  useEffect(() => {
-    if (!recipeMenuId || (recipeScopeType !== "BASE" && !recipeScopeId)) return;
     const menuItem = menuItems.find((item) => item.id === recipeMenuId);
+    if (!menuItem) return;
+
     const recipeItems =
       menuItem?.recipeItems.filter((item) =>
         recipeScopeType === "BASE"
@@ -161,6 +166,7 @@ export default function InventoryPage() {
             ? item.variantId === recipeScopeId
             : item.addonId === recipeScopeId
       ) ?? [];
+    loadedRecipeSelection.current = recipeSelectionKey;
     setRecipeLines(
       recipeItems.length
         ? recipeItems.map((item) => ({
@@ -169,7 +175,7 @@ export default function InventoryPage() {
           }))
         : [{ ingredientId: "", quantity: "" }]
     );
-  }, [recipeMenuId, recipeScopeId, recipeScopeType, menuItems]);
+  }, [recipeMenuId, recipeScopeId, recipeScopeType, recipeSelectionKey, menuItems]);
 
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ["inventory-data"] });
@@ -620,7 +626,15 @@ export default function InventoryPage() {
                 Review, edit, and save base, variant, or add-on recipes. Ingredients are deducted transactionally when Kitchen marks an order Ready, once per order.
               </p>
             </div>
-            <select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={recipeMenuId} onChange={(event) => setRecipeMenuId(event.target.value)}>
+            <select
+              className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+              value={recipeMenuId}
+              onChange={(event) => {
+                setRecipeMenuId(event.target.value);
+                setRecipeScopeType("BASE");
+                setRecipeScopeId("");
+              }}
+            >
               <option value="">Select a menu item</option>
               {menuItems.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select>
